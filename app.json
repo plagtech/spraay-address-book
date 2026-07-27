@@ -1,0 +1,52 @@
+{
+  "expo": {
+    "name": "Spraay",
+    "slug": "spraay-address-book",
+    "scheme": "spraay",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#FBFBF9"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "app.spraay.addressbook"
+    },
+    "android": {
+      "package": "app.spraay.addressbook",
+      "versionCode": 1,
+      "adaptiveIcon": {
+        "backgroundColor": "#E0F2FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "blockedPermissions": [
+        "android.permission.READ_CONTACTS",
+        "android.permission.WRITE_CONTACTS"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-font",
+      "expo-splash-screen"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "2b80098f-12f3-4ed9-a1dd-8c47978ae670"
+      }
+    }
+  }
+}

@@ -1,0 +1,48 @@
+{
+  "name": "spraay-address-book",
+  "version": "1.0.0",
+  "main": "expo-router/entry",
+  "private": true,
+  "dependencies": {
+    "@expo-google-fonts/fredoka": "^0.4.1",
+    "@expo-google-fonts/inter": "^0.4.2",
+    "@react-native-async-storage/async-storage": "2.2.0",
+    "@react-native-community/netinfo": "12.0.1",
+    "@reown/appkit-wagmi-react-native": "^2.0.6",
+    "@tanstack/react-query": "^5.101.4",
+    "@walletconnect/react-native-compat": "^2.23.10",
+    "@walletconnect/utils": "^2.23.10",
+    "expo": "~57.0.8",
+    "expo-application": "~57.0.2",
+    "expo-clipboard": "~57.0.1",
+    "expo-constants": "~57.0.7",
+    "expo-font": "~57.0.1",
+    "expo-linking": "~57.0.4",
+    "expo-router": "~57.0.8",
+    "expo-splash-screen": "~57.0.5",
+    "expo-status-bar": "~57.0.1",
+    "react": "19.2.3",
+    "react-native": "0.86.0",
+    "react-native-gesture-handler": "~2.32.0",
+    "react-native-get-random-values": "~1.11.0",
+    "react-native-safe-area-context": "~5.7.0",
+    "react-native-screens": "~4.26.0",
+    "react-native-svg": "15.15.4",
+    "viem": "^2.55.8",
+    "wagmi": "^2.19.5"
+  },
+  "devDependencies": {
+    "@types/react": "~19.2.2",
+    "typescript": "~6.0.3"
+  },
+  "overrides": {
+    "react-dom": "19.2.3"
+  },
+  "scripts": {
+    "start": "expo start",
+    "android": "expo start --android",
+    "ios": "expo start --ios",
+    "typecheck": "tsc --noEmit",
+    "test": "jest"
+  }
+}
