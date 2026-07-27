@@ -13,7 +13,6 @@
     },
     "android": {
       "package": "app.spraay.addressbook",
-      "versionCode": 1,
       "adaptiveIcon": {
         "backgroundColor": "#E0F2FE",
         "foregroundImage": "./assets/android-icon-foreground.png",
