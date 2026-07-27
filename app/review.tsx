@@ -18,6 +18,7 @@ import { GasCheckCard } from '../src/components/GasCheckCard';
 import { Screen } from '../src/components/Screen';
 import { Body, Display, Eyebrow, Label, Mono } from '../src/components/Text';
 import { BASESCAN_TX_URL } from '../src/config/chain';
+import { useEstimateBatch } from '../src/gateway/useEstimateBatch';
 import { DEFAULT_TOKEN } from '../src/config/tokens';
 import { colors, radii } from '../src/theme';
 import { formatEthAmount } from '../src/tx/gasPreflight';
@@ -63,6 +64,9 @@ export default function ReviewScreen() {
 
   /** Hooks run before the parse guard below — order must not depend on params. */
   const send = useSpraySend();
+
+  /** Hint only (spec §1.4) — the on-chain preflight above decides affordability. */
+  const estimate = useEstimateBatch(batch?.recipients.length ?? 0, batch !== undefined);
 
   if (!parsed.ok) {
     return (
@@ -165,7 +169,13 @@ export default function ReviewScreen() {
         />
         <CostRow
           label={`Network fee${gas?.approximate ? ' (approx.)' : ''}`}
-          value={gas ? formatEthAmount(gas.totalFeeWei) : 'Checking…'}
+          value={
+            gas
+              ? estimate?.estimatedGasUSD !== undefined
+                ? `${formatEthAmount(gas.totalFeeWei)} · ≈$${estimate.estimatedGasUSD.toFixed(2)}`
+                : formatEthAmount(gas.totalFeeWei)
+              : 'Checking…'
+          }
           muted
         />
       </View>
@@ -178,6 +188,7 @@ export default function ReviewScreen() {
           preflight={preflight}
           maxRecipients={preflight.maxRecipients}
           recipientCount={recipients.length}
+          feeUsd={estimate?.estimatedGasUSD}
         />
       ) : null}
 
@@ -349,15 +360,23 @@ function BlockerView({
   preflight,
   maxRecipients,
   recipientCount,
+  feeUsd,
 }: {
   blocker: BlockerKind;
   preflight: ReturnType<typeof useSendPreflight>;
   maxRecipients: number;
   recipientCount: number;
+  feeUsd?: number;
 }) {
   /** The ETH shortfall has its own card — it needs figures and a way out. */
   if (blocker === 'insufficient-eth' && preflight.gas) {
-    return <GasCheckCard budget={preflight.gas} onRetry={preflight.refetch} />;
+    return (
+      <GasCheckCard
+        budget={preflight.gas}
+        feeUsd={feeUsd}
+        onRetry={preflight.refetch}
+      />
+    );
   }
 
   const copy = blockerCopy(blocker, {

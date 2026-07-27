@@ -24,6 +24,8 @@ import { isAddress, getAddress, type Address } from 'viem';
 import { Button } from '../src/components/Button';
 import { TextField } from '../src/components/TextField';
 import { Body, Display, Eyebrow, Label } from '../src/components/Text';
+import { GatewayBanner } from '../src/gateway/GatewayBanner';
+import { useValidateBatch } from '../src/gateway/useValidateBatch';
 import { DEFAULT_TOKEN } from '../src/config/tokens';
 import { colors, CONTENT_MAX_WIDTH, radii } from '../src/theme';
 import { formatTokenDisplay, parseTokenAmount } from '../src/tx/amounts';
@@ -101,7 +103,28 @@ export default function PayoutEntryScreen() {
     [rows, mode, sharedAmount],
   );
 
-  const canReview = parsed.recipients.length > 0 && parsed.rowErrors.every((e) => !e);
+  /**
+   * Spec §2 step 1 / §1.4: the gateway must return `valid: true` before Review opens.
+   * Amounts are per-recipient, so equal mode fans the shared amount out across rows.
+   */
+  const batchForValidation = useMemo(
+    () =>
+      parsed.recipients.map((address, i) => ({
+        address,
+        amount: mode === 'equal' ? parsed.sharedValue : (parsed.amounts[i] ?? 0n),
+      })),
+    [parsed.recipients, parsed.amounts, parsed.sharedValue, mode],
+  );
+
+  const validation = useValidateBatch(
+    batchForValidation,
+    token.decimals,
+    token.symbol,
+    parsed.recipients.length > 0,
+  );
+
+  const locallyValid = parsed.recipients.length > 0 && parsed.rowErrors.every((e) => !e);
+  const canReview = locallyValid && validation.isValid;
 
   const goToReview = () => {
     if (!canReview) return;
@@ -135,6 +158,8 @@ export default function PayoutEntryScreen() {
             <Display style={styles.title}>Pay people</Display>
             <Button title="Back" variant="link" onPress={() => router.back()} />
           </View>
+
+          <GatewayBanner />
 
           <View style={styles.toggle}>
             <ToggleOption
@@ -250,6 +275,48 @@ export default function PayoutEntryScreen() {
             </View>
           ) : null}
 
+          {validation.transportError && locallyValid ? (
+            <View style={styles.checkCard} accessibilityRole="alert">
+              <Label style={styles.checkTitle}>Couldn't check this payout</Label>
+              <Body style={styles.checkBody}>{validation.transportError}</Body>
+              <Button
+                title="Check again"
+                variant="secondary"
+                style={styles.checkAction}
+                onPress={validation.refetch}
+              />
+            </View>
+          ) : null}
+
+          {validation.result && !validation.result.valid ? (
+            <View style={styles.errorCard} accessibilityRole="alert">
+              <Label style={styles.errorCardTitle}>This payout needs a fix</Label>
+              {validation.result.errors.length > 0 ? (
+                validation.result.errors.map((e, i) => (
+                  <Body key={`${e.message}-${i}`} style={styles.errorCardLine}>
+                    {e.index !== undefined ? `Person ${e.index + 1}: ` : ''}
+                    {e.message}
+                  </Body>
+                ))
+              ) : (
+                <Body style={styles.errorCardLine}>
+                  One of these addresses or amounts can't be paid. Double-check them.
+                </Body>
+              )}
+            </View>
+          ) : null}
+
+          {validation.result?.warnings.length ? (
+            <View style={styles.noticeCard}>
+              {validation.result.warnings.map((w, i) => (
+                <Body key={`${w.message}-${i}`} style={styles.noticeText}>
+                  {w.index !== undefined ? `Person ${w.index + 1}: ` : ''}
+                  {w.message}
+                </Body>
+              ))}
+            </View>
+          ) : null}
+
           {parsed.duplicates.length > 0 ? (
             <View style={styles.noticeCard}>
               <Body style={styles.noticeText}>
@@ -275,9 +342,10 @@ export default function PayoutEntryScreen() {
             </Display>
           </View>
           <Button
-            title="Review →"
+            title={validation.isChecking && locallyValid ? 'Checking…' : 'Review →'}
             variant="accent"
             disabled={!canReview}
+            loading={validation.isChecking && locallyValid}
             onPress={goToReview}
           />
         </View>
@@ -469,6 +537,28 @@ const styles = StyleSheet.create({
     padding: 12,
   },
   noticeText: { color: '#92400E', fontSize: 13, lineHeight: 19 },
+  checkCard: {
+    marginTop: 14,
+    backgroundColor: colors.fill,
+    borderWidth: 2,
+    borderColor: colors.border,
+    borderRadius: radii.md,
+    padding: 12,
+  },
+  checkTitle: { color: colors.ink, fontSize: 14 },
+  checkBody: { color: colors.muted, fontSize: 12.5, marginTop: 4, lineHeight: 18 },
+  checkAction: { marginTop: 10, alignSelf: 'flex-start' },
+  errorCard: {
+    marginTop: 14,
+    backgroundColor: colors.dangerSoft,
+    borderWidth: 2,
+    borderColor: colors.danger,
+    borderRadius: radii.md,
+    padding: 12,
+    gap: 4,
+  },
+  errorCardTitle: { color: '#7F1D1D', fontSize: 14.5 },
+  errorCardLine: { color: '#7F1D1D', fontSize: 12.5, lineHeight: 18 },
   bar: {
     position: 'absolute',
     left: 0,
