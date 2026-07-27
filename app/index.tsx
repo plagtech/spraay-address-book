@@ -6,6 +6,7 @@
  * that move is a copy-paste, not a rewrite.
  */
 import { StyleSheet, View } from 'react-native';
+import { router } from 'expo-router';
 
 import { Button } from '../src/components/Button';
 import { Screen } from '../src/components/Screen';
@@ -80,6 +81,16 @@ export default function WalletScreen() {
         </View>
       )}
 
+      <Button
+        title="Pay people →"
+        variant="primary"
+        size="lg"
+        block
+        style={styles.payButton}
+        disabled={!isConnected}
+        onPress={() => router.push('/pay')}
+      />
+
       <Eyebrow style={styles.eyebrow}>Build check</Eyebrow>
       <View style={styles.card}>
         <Body style={styles.factRow}>
@@ -126,6 +137,7 @@ const styles = StyleSheet.create({
   meta: { fontSize: 13.5, color: '#667085', lineHeight: 20 },
   actions: { flexDirection: 'row', gap: 10, marginTop: 14 },
   connectButton: { marginTop: 16 },
+  payButton: { marginTop: 22 },
   setupCard: {
     backgroundColor: '#FEE2E2',
     borderWidth: 2,
