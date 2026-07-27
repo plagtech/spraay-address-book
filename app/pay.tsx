@@ -25,6 +25,7 @@ import { isAddress, getAddress, type Address } from 'viem';
 import { Button } from '../src/components/Button';
 import { TextField } from '../src/components/TextField';
 import { Body, Display, Eyebrow, Label } from '../src/components/Text';
+import { ContactPicker } from '../src/contacts/ContactPicker';
 import { useContacts } from '../src/contacts/useContacts';
 import { GatewayBanner } from '../src/gateway/GatewayBanner';
 import { useValidateBatch } from '../src/gateway/useValidateBatch';
@@ -75,6 +76,8 @@ export default function PayoutEntryScreen() {
   const [showImport, setShowImport] = useState(false);
   const [importText, setImportText] = useState('');
   const [importErrors, setImportErrors] = useState<string[]>([]);
+  /** Row id the book sheet is currently filling, or undefined when closed. */
+  const [pickingFor, setPickingFor] = useState<string | undefined>();
 
   const updateRow = (id: string, patch: Partial<Row>) => {
     setRows((rs) => rs.map((r) => (r.id === id ? { ...r, ...patch } : r)));
@@ -236,13 +239,23 @@ export default function PayoutEntryScreen() {
                 </Pressable>
               </View>
 
-              <TextField
-                value={row.address}
-                onChangeText={(t) => updateRow(row.id, { address: t, name: undefined })}
-                placeholder="0x… wallet address"
-                mono
-                error={parsed.rowErrors[i]}
-              />
+              <View style={styles.addressRow}>
+                <TextField
+                  value={row.address}
+                  onChangeText={(t) => updateRow(row.id, { address: t, name: undefined })}
+                  placeholder="0x… wallet address"
+                  mono
+                  error={parsed.rowErrors[i]}
+                />
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`Pick person ${i + 1} from your book`}
+                  onPress={() => setPickingFor(row.id)}
+                  style={styles.bookButton}
+                >
+                  <Label style={styles.bookButtonText}>📖</Label>
+                </Pressable>
+              </View>
 
               {mode === 'custom' ? (
                 <View style={styles.amountWrap}>
@@ -366,6 +379,18 @@ export default function PayoutEntryScreen() {
           ) : null}
         </View>
       </ScrollView>
+
+      <ContactPicker
+        visible={pickingFor !== undefined}
+        onClose={() => setPickingFor(undefined)}
+        usedAddresses={rows.map((r) => r.address)}
+        onPick={(contact) => {
+          if (pickingFor) {
+            updateRow(pickingFor, { address: contact.address, name: contact.name });
+          }
+          setPickingFor(undefined);
+        }}
+      />
 
       {/* Sticky summary — spec §3.3: "live count + total + Review →". */}
       <View style={[styles.bar, { paddingBottom: insets.bottom + 12 }]}>
@@ -554,6 +579,14 @@ const styles = StyleSheet.create({
   rowSpacer: { flex: 1 },
   removeButton: { paddingHorizontal: 8, paddingVertical: 2 },
   removeText: { fontSize: 20, color: colors.faint, lineHeight: 22 },
+  addressRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
+  bookButton: {
+    backgroundColor: colors.fill,
+    borderRadius: radii.md,
+    paddingHorizontal: 12,
+    paddingVertical: 11,
+  },
+  bookButtonText: { fontSize: 17 },
   amountWrap: { marginTop: 8 },
   addButton: { marginTop: 4 },
   importBlock: { marginTop: 6 },

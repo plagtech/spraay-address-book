@@ -8,8 +8,8 @@
  *
  * Recipients and amounts arrive as router params in BASE UNITS — see `reviewParams.ts`.
  */
-import { useMemo } from 'react';
-import { Linking, StyleSheet, View } from 'react-native';
+import { useEffect, useMemo } from 'react';
+import { StyleSheet, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { formatUnits } from 'viem';
 
@@ -17,7 +17,6 @@ import { Button } from '../src/components/Button';
 import { GasCheckCard } from '../src/components/GasCheckCard';
 import { Screen } from '../src/components/Screen';
 import { Body, Display, Eyebrow, Label, Mono } from '../src/components/Text';
-import { BASESCAN_TX_URL } from '../src/config/chain';
 import { useEstimateBatch } from '../src/gateway/useEstimateBatch';
 import { DEFAULT_TOKEN } from '../src/config/tokens';
 import { colors, radii } from '../src/theme';
@@ -98,37 +97,20 @@ export default function ReviewScreen() {
     !preflight.isLoading &&
     !send.isBusy;
 
-  /** Success takes over the screen — the cost breakdown is no longer the point. */
+  /**
+   * Hand off to the dedicated Success screen (spec §3.5) with the CONTRACT's figures,
+   * and `replace` so the hardware back button cannot return to a review of a payment
+   * that has already been sent.
+   */
   if (send.phase === 'success' && send.result) {
     return (
-      <Screen>
-        <Header />
-        <View style={styles.successCard}>
-          <Display style={styles.successAmount}>
-            ${formatToken(send.result.totalAmount)}
-          </Display>
-          <Body style={styles.successMeta}>
-            sent to {send.result.recipientCount}{' '}
-            {send.result.recipientCount === 1 ? 'person' : 'people'} · fee $
-            {formatToken(send.result.feeAmount)}
-          </Body>
-          <Button
-            title="View on Basescan ↗"
-            variant="secondary"
-            style={styles.successAction}
-            onPress={() => {
-              void Linking.openURL(BASESCAN_TX_URL(send.result!.hash));
-            }}
-          />
-          <Button
-            title="Done"
-            variant="primary"
-            block
-            style={styles.successDone}
-            onPress={() => router.replace('/')}
-          />
-        </View>
-      </Screen>
+      <SuccessRedirect
+        hash={send.result.hash}
+        total={send.result.totalAmount}
+        count={send.result.recipientCount}
+        fee={send.result.feeAmount}
+        recipients={recipients}
+      />
     );
   }
 
@@ -268,6 +250,47 @@ export default function ReviewScreen() {
           ? 'Keep this screen open until it finishes.'
           : `${needsApproval ? '2 transactions' : '1 transaction'} · you keep your keys`}
       </Body>
+    </Screen>
+  );
+}
+
+/**
+ * Navigation must happen in an effect, not during render. Renders a brief confirmation
+ * rather than null so the moment between mining and the success screen isn't a blank.
+ */
+function SuccessRedirect({
+  hash,
+  total,
+  count,
+  fee,
+  recipients,
+}: {
+  hash: string;
+  total: bigint;
+  count: number;
+  fee: bigint;
+  recipients: readonly string[];
+}) {
+  const joined = recipients.join(',');
+
+  useEffect(() => {
+    router.replace({
+      pathname: '/success',
+      params: {
+        hash,
+        total: total.toString(),
+        count: String(count),
+        fee: fee.toString(),
+        recipients: joined,
+      },
+    });
+  }, [hash, total, count, fee, joined]);
+
+  return (
+    <Screen>
+      <View style={styles.redirect}>
+        <Display style={styles.redirectText}>Sent ✓</Display>
+      </View>
     </Screen>
   );
 }
@@ -514,25 +537,8 @@ const styles = StyleSheet.create({
   },
   unverifiedTitle: { color: '#92400E', fontSize: 14 },
   unverifiedBody: { color: '#92400E', fontSize: 12.5, marginTop: 4, lineHeight: 18 },
-  successCard: {
-    backgroundColor: colors.surface,
-    borderWidth: 2,
-    borderColor: colors.success,
-    borderRadius: radii.xxl,
-    padding: 22,
-    marginTop: 18,
-    alignItems: 'center',
-  },
-  successAmount: { fontSize: 34, color: colors.ink },
-  successMeta: {
-    fontSize: 13.5,
-    color: colors.muted,
-    marginTop: 6,
-    textAlign: 'center',
-    lineHeight: 20,
-  },
-  successAction: { marginTop: 16 },
-  successDone: { marginTop: 10 },
+  redirect: { alignItems: 'center', paddingVertical: 60 },
+  redirectText: { fontSize: 28, color: colors.successDeep },
   errorCard: {
     backgroundColor: colors.fill,
     borderWidth: 2,

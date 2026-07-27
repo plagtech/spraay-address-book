@@ -84,17 +84,27 @@ export default function AddressBookScreen() {
           <Display style={styles.wordmark}>
             spraay<Display style={styles.wordmarkAccent}> book</Display>
           </Display>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={isConnected ? 'Wallet details' : 'Connect wallet'}
-            onPress={isConnected ? openAccount : connect}
-            disabled={!HAS_REOWN_PROJECT_ID}
-            style={styles.walletChip}
-          >
-            <Label style={styles.walletChipText}>
-              {isConnected && address ? shortAddress(address) : 'Connect'}
-            </Label>
-          </Pressable>
+          <View style={styles.headerActions}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={isConnected ? 'Wallet details' : 'Connect wallet'}
+              onPress={isConnected ? openAccount : connect}
+              disabled={!HAS_REOWN_PROJECT_ID}
+              style={styles.walletChip}
+            >
+              <Label style={styles.walletChipText}>
+                {isConnected && address ? shortAddress(address) : 'Connect'}
+              </Label>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Settings"
+              onPress={() => router.push('/settings')}
+              style={styles.settingsButton}
+            >
+              <Label style={styles.settingsIcon}>⚙</Label>
+            </Pressable>
+          </View>
         </View>
 
         <NetworkBanner />
@@ -256,6 +266,14 @@ const styles = StyleSheet.create({
     borderRadius: radii.pill,
   },
   walletChipText: { fontSize: 12.5, color: colors.muted },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  settingsButton: {
+    backgroundColor: colors.fill,
+    borderRadius: radii.pill,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
+  settingsIcon: { fontSize: 14, color: colors.muted },
   searchRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, marginBottom: 16 },
   card: {
     flexDirection: 'row',

@@ -29,8 +29,13 @@ const DEBOUNCE_MS = 400;
 const looksLikeName = (v: string) => /\.(eth|base\.eth)$/i.test(v.trim());
 
 export default function ContactScreen() {
-  const params = useLocalSearchParams() as { id?: string | string[] };
+  const params = useLocalSearchParams() as {
+    id?: string | string[];
+    address?: string | string[];
+  };
   const editingId = Array.isArray(params.id) ? params.id[0] : params.id;
+  /** Handed over by the Success screen's "save these people" rows (spec §3.5). */
+  const presetAddress = Array.isArray(params.address) ? params.address[0] : params.address;
 
   const { contacts, add, update, remove } = useContacts();
   const existing = useMemo(
@@ -39,7 +44,9 @@ export default function ContactScreen() {
   );
 
   const [name, setName] = useState('');
-  const [addressInput, setAddressInput] = useState('');
+  const [addressInput, setAddressInput] = useState(() =>
+    presetAddress && isAddress(presetAddress) ? getAddress(presetAddress) : '',
+  );
   const [label, setLabel] = useState<LabelKey>('friend');
   const [saveError, setSaveError] = useState<string | undefined>();
   const [hydrated, setHydrated] = useState(false);
