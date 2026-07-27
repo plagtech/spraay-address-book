@@ -17,7 +17,9 @@ import { Button } from '../src/components/Button';
 import { GasCheckCard } from '../src/components/GasCheckCard';
 import { Screen } from '../src/components/Screen';
 import { Body, Display, Eyebrow, Label, Mono } from '../src/components/Text';
+import { useContacts } from '../src/contacts/useContacts';
 import { useEstimateBatch } from '../src/gateway/useEstimateBatch';
+import { useHistory } from '../src/history/useHistory';
 import { DEFAULT_TOKEN } from '../src/config/tokens';
 import { colors, radii } from '../src/theme';
 import { formatEthAmount } from '../src/tx/gasPreflight';
@@ -110,6 +112,9 @@ export default function ReviewScreen() {
         count={send.result.recipientCount}
         fee={send.result.feeAmount}
         recipients={recipients}
+        mode={mode}
+        amounts={amounts}
+        amountPerRecipient={amountPerRecipient}
       />
     );
   }
@@ -255,8 +260,16 @@ export default function ReviewScreen() {
 }
 
 /**
- * Navigation must happen in an effect, not during render. Renders a brief confirmation
- * rather than null so the moment between mining and the success screen isn't a blank.
+ * Writes the history record, then navigates. Both must happen in an effect, not during
+ * render, and the write comes first so the Success screen can find its own receipt.
+ *
+ * This is the only place a send is recorded, and it is reached only after
+ * `SprayTokenExecuted` was decoded — so history can never contain a pending or failed
+ * payment. The write is idempotent on transaction hash, which matters because this
+ * component re-mounts on a dev fast-refresh and under StrictMode double-invocation.
+ *
+ * Renders a brief confirmation rather than null so the moment between mining and the
+ * success screen isn't a blank.
  */
 function SuccessRedirect({
   hash,
@@ -264,26 +277,60 @@ function SuccessRedirect({
   count,
   fee,
   recipients,
+  mode,
+  amounts,
+  amountPerRecipient,
 }: {
-  hash: string;
+  hash: `0x${string}`;
   total: bigint;
   count: number;
   fee: bigint;
-  recipients: readonly string[];
+  recipients: readonly `0x${string}`[];
+  mode: 'equal' | 'custom';
+  amounts?: bigint[];
+  amountPerRecipient?: bigint;
 }) {
   const joined = recipients.join(',');
+  const { record } = useHistory();
+  const { findByAddress } = useContacts();
 
   useEffect(() => {
-    router.replace({
-      pathname: '/success',
-      params: {
-        hash,
-        total: total.toString(),
-        count: String(count),
-        fee: fee.toString(),
-        recipients: joined,
-      },
+    /** Names are copied at send time, so an old receipt reflects what the user saw. */
+    const rows = recipients.map((address, i) => {
+      const name = findByAddress(address)?.name;
+      return {
+        address,
+        ...(name ? { name } : {}),
+        amount: mode === 'equal' ? (amountPerRecipient ?? 0n) : (amounts?.[i] ?? 0n),
+      };
     });
+
+    const go = () =>
+      router.replace({
+        pathname: '/success',
+        params: {
+          hash,
+          total: total.toString(),
+          count: String(count),
+          fee: fee.toString(),
+          recipients: joined,
+        },
+      });
+
+    void record({
+      hash,
+      mode,
+      recipients: rows,
+      recipientCount: count,
+      total,
+      fee,
+      token: token.symbol,
+      decimals: token.decimals,
+    })
+      /** A failed local write must not strand the user on a blank screen. */
+      .catch(() => undefined)
+      .finally(go);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hash, total, count, fee, joined]);
 
   return (

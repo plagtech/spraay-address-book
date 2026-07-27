@@ -9,8 +9,8 @@
  * and repeating the payout. Repeat pre-fills the entry screen; there is no scheduling
  * in v1 (spec §3.5).
  */
-import { useEffect, useMemo, useRef } from 'react';
-import { Animated, Easing, Linking, StyleSheet, View } from 'react-native';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Animated, Easing, Linking, Share, StyleSheet, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { isAddress, type Address } from 'viem';
 
@@ -20,6 +20,8 @@ import { Body, Display, Eyebrow, Label, Mono } from '../src/components/Text';
 import { BASESCAN_TX_URL } from '../src/config/chain';
 import { DEFAULT_TOKEN } from '../src/config/tokens';
 import { useContacts } from '../src/contacts/useContacts';
+import { formatReceipt } from '../src/history/receipt';
+import { useHistory } from '../src/history/useHistory';
 import { colors, radii } from '../src/theme';
 import { formatTokenDisplay } from '../src/tx/amounts';
 
@@ -51,6 +53,8 @@ const toBigInt = (v: string | undefined): bigint => {
 export default function SuccessScreen() {
   const raw = useLocalSearchParams() as RawSuccessParams;
   const { contacts } = useContacts();
+  const { findByHash } = useHistory();
+  const [shareError, setShareError] = useState<string | undefined>();
 
   const hash = one(raw.hash) ?? '';
   const total = toBigInt(one(raw.total));
@@ -71,6 +75,22 @@ export default function SuccessScreen() {
     const known = new Set(contacts.map((c) => c.address.toLowerCase()));
     return recipients.filter((a) => !known.has(a.toLowerCase()));
   }, [contacts, recipients]);
+
+  /**
+   * Share the stored record rather than re-deriving text from params: the record is what
+   * the History tab shows, so a shared receipt and a saved one can never disagree.
+   */
+  const stored = hash ? findByHash(hash) : undefined;
+
+  const share = async () => {
+    if (!stored) return;
+    setShareError(undefined);
+    try {
+      await Share.share({ message: formatReceipt(stored) });
+    } catch {
+      setShareError("Couldn't open the share sheet. Try again.");
+    }
+  };
 
   const repeat = () => {
     const params: Record<string, string> = {
@@ -101,15 +121,28 @@ export default function SuccessScreen() {
         <View style={styles.hashCard}>
           <Label style={styles.hashLabel}>Transaction</Label>
           <Mono style={styles.hash}>{shortAddress(hash)}</Mono>
-          <Button
-            title="View on Basescan ↗"
-            variant="secondary"
-            size="sm"
-            style={styles.hashAction}
-            onPress={() => {
-              void Linking.openURL(BASESCAN_TX_URL(hash));
-            }}
-          />
+          <View style={styles.hashActions}>
+            <Button
+              title="Share receipt"
+              variant="accent"
+              size="sm"
+              disabled={!stored}
+              onPress={() => void share()}
+            />
+            <Button
+              title="Basescan ↗"
+              variant="secondary"
+              size="sm"
+              onPress={() => {
+                void Linking.openURL(BASESCAN_TX_URL(hash));
+              }}
+            />
+          </View>
+          {shareError ? (
+            <Body style={styles.shareError} accessibilityRole="alert">
+              {shareError}
+            </Body>
+          ) : null}
         </View>
       ) : null}
 
@@ -251,7 +284,14 @@ const styles = StyleSheet.create({
   },
   hashLabel: { fontSize: 12.5, color: colors.faint },
   hash: { fontSize: 14, color: colors.inkSoft, marginTop: 4 },
-  hashAction: { marginTop: 12 },
+  hashActions: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 12,
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+  },
+  shareError: { color: colors.danger, fontSize: 12, marginTop: 8, textAlign: 'center' },
   eyebrow: { marginTop: 24, marginBottom: 8 },
   card: {
     backgroundColor: colors.surface,

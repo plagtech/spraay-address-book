@@ -12,22 +12,22 @@ import { Pressable, StyleSheet, View } from 'react-native';
 import { router } from 'expo-router';
 import * as Clipboard from 'expo-clipboard';
 
-import { Button } from '../src/components/Button';
-import { Screen } from '../src/components/Screen';
-import { TextField } from '../src/components/TextField';
-import { Body, Display, Label, Mono } from '../src/components/Text';
-import { HAS_REOWN_PROJECT_ID } from '../src/config/env';
-import { DEFAULT_TOKEN } from '../src/config/tokens';
+import { Button } from '../../src/components/Button';
+import { Screen } from '../../src/components/Screen';
+import { TextField } from '../../src/components/TextField';
+import { Body, Display, Label, Mono } from '../../src/components/Text';
+import { HAS_REOWN_PROJECT_ID } from '../../src/config/env';
+import { DEFAULT_TOKEN } from '../../src/config/tokens';
 import {
   filterContacts,
   sortContacts,
   useContacts,
   type Contact,
-} from '../src/contacts/useContacts';
-import { GatewayBanner } from '../src/gateway/GatewayBanner';
-import { colors, CONTENT_MAX_WIDTH, LABELS, radii } from '../src/theme';
-import { NetworkBanner } from '../src/wallet/NetworkBanner';
-import { useWallet } from '../src/wallet/useWallet';
+} from '../../src/contacts/useContacts';
+import { GatewayBanner } from '../../src/gateway/GatewayBanner';
+import { colors, CONTENT_MAX_WIDTH, LABELS, radii } from '../../src/theme';
+import { NetworkBanner } from '../../src/wallet/NetworkBanner';
+import { useWallet } from '../../src/wallet/useWallet';
 
 const shortAddress = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
 
