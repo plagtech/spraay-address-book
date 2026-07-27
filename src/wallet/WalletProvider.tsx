@@ -10,6 +10,7 @@ import { AppKit, AppKitProvider } from '@reown/appkit-react-native';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { WagmiProvider } from 'wagmi';
 
+import { ContractConstantsPrefetch } from '../contracts/useContractConstants';
 import { appKit, wagmiConfig } from './appkit';
 
 const queryClient = new QueryClient({
@@ -28,6 +29,8 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     <AppKitProvider instance={appKit}>
       <WagmiProvider config={wagmiConfig}>
         <QueryClientProvider client={queryClient}>
+          {/* Spec §2 step 8: read the contract's constants at startup, not on demand. */}
+          <ContractConstantsPrefetch />
           {children}
           <AppKit />
         </QueryClientProvider>

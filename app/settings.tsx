@@ -18,6 +18,7 @@ import { Screen } from '../src/components/Screen';
 import { Body, Display, Eyebrow, Label, Mono } from '../src/components/Text';
 import { BASE_CHAIN_ID } from '../src/config/chain';
 import { SUPPORT_EMAIL, WEBSITE_URL } from '../src/config/env';
+import { toCsv } from '../src/contacts/csv';
 import { useContacts } from '../src/contacts/useContacts';
 import { colors, radii } from '../src/theme';
 import { useWallet } from '../src/wallet/useWallet';
@@ -149,21 +150,6 @@ function Row({ label, value }: { label: string; value: string }) {
       <Label style={styles.rowValue}>{value}</Label>
     </View>
   );
-}
-
-/**
- * CSV with the fields a person would want back: name, address, label. Values are quoted
- * and inner quotes doubled, so a contact named `O"Brien, Ada` cannot break the columns.
- */
-export function toCsv(
-  contacts: readonly { name: string; address: string; label: string }[],
-): string {
-  const escape = (v: string) => `"${v.replace(/"/g, '""')}"`;
-  const header = 'name,address,label';
-  const rows = [...contacts]
-    .sort((a, b) => a.name.localeCompare(b.name))
-    .map((c) => [escape(c.name), escape(c.address), escape(c.label)].join(','));
-  return [header, ...rows].join('\n');
 }
 
 const styles = StyleSheet.create({

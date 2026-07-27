@@ -16,9 +16,10 @@
 import { useQuery } from '@tanstack/react-query';
 import type { Address } from 'viem';
 
-import { SPRAY_CONTRACT_ADDRESS, VERIFIED_AT_BUILD } from '../config/chain';
+import { SPRAY_CONTRACT_ADDRESS } from '../config/chain';
 import { ERC20_ABI, SPRAY_ABI } from '../contracts/abi';
 import { publicClient } from '../contracts/publicClient';
+import { useContractConstants } from '../contracts/useContractConstants';
 import { useGasPreflight } from './useGasPreflight';
 import type { GasBudget, SprayMode } from './gasPreflight';
 
@@ -131,12 +132,13 @@ export function useSendPreflight(params: SendPreflightParams): SendPreflight {
   const allowance = reads.data?.allowance;
 
   /**
-   * Spec §2 step 8: read the cap on chain, never trust the build-time literal. The
-   * fallback only covers first paint, before the read resolves.
+   * Spec §2 step 8: the cap comes from chain, never from a literal. This screen re-reads
+   * it alongside `paused` rather than trusting the startup cache — by the time a send is
+   * about to happen, a fresh read is cheap and a stale cap is not worth the risk. The
+   * cached value covers only the gap before that read lands.
    */
-  const maxRecipients = reads.data
-    ? Number(reads.data.maxRecipients)
-    : VERIFIED_AT_BUILD.MAX_RECIPIENTS;
+  const cached = useContractConstants();
+  const maxRecipients = reads.data ? Number(reads.data.maxRecipients) : cached.maxRecipients;
 
   const needsApproval =
     totalCost !== undefined && allowance !== undefined ? allowance < totalCost : false;

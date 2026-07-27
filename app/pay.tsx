@@ -27,6 +27,7 @@ import { TextField } from '../src/components/TextField';
 import { Body, Display, Eyebrow, Label } from '../src/components/Text';
 import { ContactPicker } from '../src/contacts/ContactPicker';
 import { useContacts } from '../src/contacts/useContacts';
+import { useContractConstants } from '../src/contracts/useContractConstants';
 import { GatewayBanner } from '../src/gateway/GatewayBanner';
 import { useValidateBatch } from '../src/gateway/useValidateBatch';
 import { DEFAULT_TOKEN } from '../src/config/tokens';
@@ -142,7 +143,15 @@ export default function PayoutEntryScreen() {
     parsed.recipients.length > 0,
   );
 
-  const locallyValid = parsed.recipients.length > 0 && parsed.rowErrors.every((e) => !e);
+  /**
+   * Spec §2 step 8: enforce the cap here, from the startup-cached on-chain value, so
+   * someone building a 300-person payout is told now rather than at Review.
+   */
+  const { maxRecipients } = useContractConstants();
+  const overCap = parsed.recipients.length > maxRecipients;
+
+  const locallyValid =
+    parsed.recipients.length > 0 && parsed.rowErrors.every((e) => !e) && !overCap;
 
   /**
    * `unverified` proceeds: an unreachable gateway must not strand a non-custodial
@@ -316,6 +325,16 @@ export default function PayoutEntryScreen() {
                   ))}
                 </View>
               ) : null}
+            </View>
+          ) : null}
+
+          {overCap ? (
+            <View style={styles.errorCard} accessibilityRole="alert">
+              <Label style={styles.errorCardTitle}>Too many people at once</Label>
+              <Body style={styles.errorCardLine}>
+                You can pay up to {maxRecipients} people in one go. This payout has{' '}
+                {parsed.recipients.length} — split it into smaller batches.
+              </Body>
             </View>
           ) : null}
 
