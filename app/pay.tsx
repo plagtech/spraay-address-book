@@ -9,6 +9,7 @@
  * silently rewritten under the cursor.
  */
 import { useMemo, useState } from 'react';
+import { useLocalSearchParams } from 'expo-router';
 import {
   KeyboardAvoidingView,
   Platform,
@@ -24,6 +25,7 @@ import { isAddress, getAddress, type Address } from 'viem';
 import { Button } from '../src/components/Button';
 import { TextField } from '../src/components/TextField';
 import { Body, Display, Eyebrow, Label } from '../src/components/Text';
+import { useContacts } from '../src/contacts/useContacts';
 import { GatewayBanner } from '../src/gateway/GatewayBanner';
 import { useValidateBatch } from '../src/gateway/useValidateBatch';
 import { DEFAULT_TOKEN } from '../src/config/tokens';
@@ -52,9 +54,23 @@ const initialRows = (): Row[] => [newRow(), newRow(), newRow()];
 
 export default function PayoutEntryScreen() {
   const insets = useSafeAreaInsets();
+  const { findByAddress } = useContacts();
+
+  /** Addresses handed over by the Address Book's "Pay them together" bar (spec §3.1). */
+  const params = useLocalSearchParams() as { prefill?: string | string[] };
+  const prefill = Array.isArray(params.prefill) ? params.prefill[0] : params.prefill;
 
   const [mode, setMode] = useState<SprayMode>('equal');
-  const [rows, setRows] = useState<Row[]>(initialRows);
+  const [rows, setRows] = useState<Row[]>(() => {
+    const addresses = (prefill ?? '')
+      .split(',')
+      .map((a) => a.trim())
+      .filter((a) => isAddress(a));
+
+    /** Lazy initial state, so a later contacts-cache update can't reset typed edits. */
+    if (addresses.length === 0) return initialRows();
+    return addresses.map((address) => ({ id: `r${nextId++}`, address, amount: '' }));
+  });
   const [sharedAmount, setSharedAmount] = useState('');
   const [showImport, setShowImport] = useState(false);
   const [importText, setImportText] = useState('');
@@ -203,7 +219,12 @@ export default function PayoutEntryScreen() {
             <View key={row.id} style={styles.row}>
               <View style={styles.rowHead}>
                 <Label style={styles.rowNumber}>{i + 1}</Label>
-                {row.name ? <Label style={styles.rowName}>{row.name}</Label> : null}
+                {/* Name comes from the book when the address is known, so a contact
+                    renamed later shows its current name rather than a stale copy. */}
+                {(() => {
+                  const known = row.name ?? findByAddress(row.address.trim())?.name;
+                  return known ? <Label style={styles.rowName}>{known}</Label> : null;
+                })()}
                 <View style={styles.rowSpacer} />
                 <Pressable
                   accessibilityRole="button"
