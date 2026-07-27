@@ -86,7 +86,7 @@ export default function ReviewScreen() {
     );
   }
 
-  const { recipients, mode, amounts, amountPerRecipient } = batch!;
+  const { recipients, mode, amounts, amountPerRecipient, unverified } = batch!;
   const { subtotal, feeAmount, totalCost, gas, blocker, needsApproval } = preflight;
 
   const amountFor = (i: number) =>
@@ -179,6 +179,17 @@ export default function ReviewScreen() {
           muted
         />
       </View>
+
+      {unverified ? (
+        <View style={styles.unverifiedCard}>
+          <Label style={styles.unverifiedTitle}>Not double-checked</Label>
+          <Body style={styles.unverifiedBody}>
+            We couldn't reach the address-checking service for this batch. The on-chain
+            safety checks above still apply — but give the addresses one more look before
+            you sign.
+          </Body>
+        </View>
+      ) : null}
 
       <Stepper needsApproval={needsApproval} phase={send.phase} />
 
@@ -495,6 +506,14 @@ const styles = StyleSheet.create({
   blockTitle: { color: '#7F1D1D', fontSize: 15 },
   blockBody: { color: '#7F1D1D', fontSize: 13.5, marginTop: 6, lineHeight: 20 },
   blockNote: { color: '#7F1D1D', fontSize: 12.5, marginTop: 8, lineHeight: 18 },
+  unverifiedCard: {
+    backgroundColor: colors.warnSoft,
+    borderRadius: radii.lg,
+    padding: 12,
+    marginTop: 16,
+  },
+  unverifiedTitle: { color: '#92400E', fontSize: 14 },
+  unverifiedBody: { color: '#92400E', fontSize: 12.5, marginTop: 4, lineHeight: 18 },
   successCard: {
     backgroundColor: colors.surface,
     borderWidth: 2,

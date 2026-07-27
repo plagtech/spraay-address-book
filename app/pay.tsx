@@ -124,7 +124,15 @@ export default function PayoutEntryScreen() {
   );
 
   const locallyValid = parsed.recipients.length > 0 && parsed.rowErrors.every((e) => !e);
-  const canReview = locallyValid && validation.isValid;
+
+  /**
+   * `unverified` proceeds: an unreachable gateway must not strand a non-custodial
+   * payment, and the on-chain guards on Review still apply. `blocked` does not — that
+   * is the gateway actively rejecting the batch.
+   */
+  const isUnverified = validation.status === 'unverified';
+  const canReview =
+    locallyValid && (validation.status === 'passed' || isUnverified);
 
   const goToReview = () => {
     if (!canReview) return;
@@ -134,11 +142,13 @@ export default function PayoutEntryScreen() {
             mode: 'equal',
             recipients: parsed.recipients,
             amountPerRecipient: parsed.sharedValue,
+            unverified: isUnverified,
           })
         : toReviewParams({
             mode: 'custom',
             recipients: parsed.recipients,
             amounts: parsed.amounts,
+            unverified: isUnverified,
           });
     router.push({ pathname: '/review', params });
   };
@@ -275,10 +285,17 @@ export default function PayoutEntryScreen() {
             </View>
           ) : null}
 
-          {validation.transportError && locallyValid ? (
+          {isUnverified && locallyValid ? (
             <View style={styles.checkCard} accessibilityRole="alert">
-              <Label style={styles.checkTitle}>Couldn't check this payout</Label>
-              <Body style={styles.checkBody}>{validation.transportError}</Body>
+              <Label style={styles.checkTitle}>
+                Couldn't double-check this batch
+              </Label>
+              <Body style={styles.checkBody}>
+                {validation.transportError ??
+                  'The checking service didn’t answer.'}{' '}
+                You can still carry on — the on-chain safety checks still apply, and
+                you’ll see the full total before anything is signed.
+              </Body>
               <Button
                 title="Check again"
                 variant="secondary"

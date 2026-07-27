@@ -19,6 +19,7 @@ export interface RawReviewParams {
   recipients?: string | string[];
   amounts?: string | string[];
   amountPerRecipient?: string | string[];
+  unverified?: string | string[];
 }
 
 export interface ParsedReview {
@@ -26,6 +27,12 @@ export interface ParsedReview {
   recipients: Address[];
   amounts?: bigint[];
   amountPerRecipient?: bigint;
+  /**
+   * Set when the batch reached Review without a gateway `valid: true` — the service was
+   * unreachable and the user chose to carry on. Review reminds them at the point of
+   * signing, since that is where it matters.
+   */
+  unverified?: boolean;
 }
 
 export type ParseResult =
@@ -62,6 +69,7 @@ export function parseReviewParams(raw: RawReviewParams): ParseResult {
     return { ok: false, reason: `Unknown send mode "${modeRaw}".` };
   }
   const mode: SprayMode = modeRaw;
+  const unverified = one(raw.unverified) === '1';
 
   const recipientsRaw = splitList(one(raw.recipients));
   if (recipientsRaw.length === 0) {
@@ -86,7 +94,7 @@ export function parseReviewParams(raw: RawReviewParams): ParseResult {
     if (amountPerRecipient === undefined || amountPerRecipient === 0n) {
       return { ok: false, reason: `"${perRaw}" is not a valid amount.` };
     }
-    return { ok: true, value: { mode, recipients, amountPerRecipient } };
+    return { ok: true, value: { mode, recipients, amountPerRecipient, unverified } };
   }
 
   const amountsRaw = splitList(one(raw.amounts));
@@ -106,7 +114,7 @@ export function parseReviewParams(raw: RawReviewParams): ParseResult {
     amounts.push(amount);
   }
 
-  return { ok: true, value: { mode, recipients, amounts } };
+  return { ok: true, value: { mode, recipients, amounts, unverified } };
 }
 
 /**
@@ -123,5 +131,7 @@ export function toReviewParams(value: ParsedReview): Record<string, string> {
   } else {
     params.amounts = (value.amounts ?? []).map(String).join(',');
   }
+  /** Omitted when false so the common case keeps a clean URL. */
+  if (value.unverified) params.unverified = '1';
   return params;
 }

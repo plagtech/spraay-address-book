@@ -15,7 +15,23 @@ import { validateBatch, type BatchRecipientInput, type ValidateBatchResult } fro
 /** Long enough that ordinary typing produces one call, short enough to feel live. */
 const DEBOUNCE_MS = 600;
 
+/**
+ * Four outcomes, because "can we proceed?" and "did the check pass?" are different
+ * questions once the gateway can be unreachable:
+ *
+ *   checking   — still settling or in flight; hold the button
+ *   passed     — gateway said `valid: true`; proceed
+ *   blocked    — gateway said `valid: false`; hard stop, it found a real problem
+ *   unverified — could not reach the gateway; warn, but let the user proceed
+ *
+ * `blocked` and `unverified` must never collapse into one state. A batch the gateway
+ * actively rejected is a different thing from one it never saw, and the on-chain guards
+ * (paused, balance, allowance, the contract itself) still cover the second case.
+ */
+export type BatchCheckStatus = 'idle' | 'checking' | 'passed' | 'blocked' | 'unverified';
+
 export interface UseValidateBatch {
+  status: BatchCheckStatus;
   result: ValidateBatchResult | undefined;
   isChecking: boolean;
   /** Transport failure, already phrased for a user. Distinct from `valid: false`. */
@@ -74,11 +90,31 @@ export function useValidateBatch(
         ? 'Could not check this payout. Try again in a moment.'
         : undefined;
 
+  const isChecking = (query.isPending && isEnabled) || isSettling;
+
+  const status: BatchCheckStatus = !isEnabled
+    ? 'idle'
+    : isChecking
+      ? 'checking'
+      : query.error
+        ? 'unverified'
+        : query.data?.valid === true
+          ? 'passed'
+          : query.data?.valid === false
+            ? 'blocked'
+            : /**
+               * No data, no error, not pending — the query is disabled or between
+               * states. Treat as unverified rather than passed: never let an
+               * indeterminate result read as approval.
+               */
+              'unverified';
+
   return {
+    status,
     result: query.data,
-    isChecking: (query.isPending && isEnabled) || isSettling,
+    isChecking,
     transportError,
-    isValid: query.data?.valid === true && !isSettling,
+    isValid: status === 'passed',
     isStale: isSettling,
     refetch: () => {
       void query.refetch();
