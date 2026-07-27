@@ -7,11 +7,6 @@
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
-    "splash": {
-      "image": "./assets/splash-icon.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#FBFBF9"
-    },
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "app.spraay.addressbook"
@@ -37,7 +32,14 @@
     "plugins": [
       "expo-router",
       "expo-font",
-      "expo-splash-screen"
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "resizeMode": "contain",
+          "backgroundColor": "#FBFBF9"
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true
