@@ -57,6 +57,8 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "typecheck": "tsc --noEmit",
-    "test": "jest"
+    "test": "jest",
+    "check:lock": "npm ci --dry-run",
+    "verify": "npm run check:lock && npm run typecheck && npm test"
   }
 }
