@@ -72,6 +72,26 @@ export const SPRAY_ABI = [
     inputs: [],
     outputs: [{ name: '', type: 'bool' }],
   },
+  /**
+   * Emitted on a successful ERC-20 spray. The success screen confirms this event is
+   * present in the receipt rather than trusting `status: 'success'` alone (spec §2
+   * step 7) — a receipt can succeed for a transaction that did not do what we meant.
+   *
+   * Indexing (sender, token) matches the deployed contract; getting it wrong here
+   * would silently shift the decoded args.
+   */
+  {
+    type: 'event',
+    name: 'SprayTokenExecuted',
+    inputs: [
+      { name: 'sender', type: 'address', indexed: true },
+      { name: 'token', type: 'address', indexed: true },
+      { name: 'totalAmount', type: 'uint256', indexed: false },
+      { name: 'recipientCount', type: 'uint256', indexed: false },
+      { name: 'feeAmount', type: 'uint256', indexed: false },
+      { name: 'timestamp', type: 'uint256', indexed: false },
+    ],
+  },
 ] as const;
 
 /** ERC-20 subset — allowance/balance reads and the exact-amount approve (spec §4). */

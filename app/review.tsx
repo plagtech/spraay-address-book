@@ -9,7 +9,7 @@
  * Recipients and amounts arrive as router params in BASE UNITS — see `reviewParams.ts`.
  */
 import { useMemo } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Linking, StyleSheet, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { formatUnits } from 'viem';
 
@@ -17,11 +17,13 @@ import { Button } from '../src/components/Button';
 import { GasCheckCard } from '../src/components/GasCheckCard';
 import { Screen } from '../src/components/Screen';
 import { Body, Display, Eyebrow, Label, Mono } from '../src/components/Text';
+import { BASESCAN_TX_URL } from '../src/config/chain';
 import { DEFAULT_TOKEN } from '../src/config/tokens';
 import { colors, radii } from '../src/theme';
 import { formatEthAmount } from '../src/tx/gasPreflight';
 import { parseReviewParams, type RawReviewParams } from '../src/tx/reviewParams';
 import { useSendPreflight, type BlockerKind } from '../src/tx/useSendPreflight';
+import { useSpraySend, type SendPhase } from '../src/tx/useSpraySend';
 import { NetworkBanner } from '../src/wallet/NetworkBanner';
 import { useWallet } from '../src/wallet/useWallet';
 
@@ -59,6 +61,9 @@ export default function ReviewScreen() {
     amounts: batch?.amounts,
   });
 
+  /** Hooks run before the parse guard below — order must not depend on params. */
+  const send = useSpraySend();
+
   if (!parsed.ok) {
     return (
       <Screen>
@@ -83,7 +88,45 @@ export default function ReviewScreen() {
   const amountFor = (i: number) =>
     mode === 'equal' ? (amountPerRecipient ?? 0n) : (amounts?.[i] ?? 0n);
 
-  const canSend = blocker === undefined && totalCost !== undefined && !preflight.isLoading;
+  const canSend =
+    blocker === undefined &&
+    totalCost !== undefined &&
+    !preflight.isLoading &&
+    !send.isBusy;
+
+  /** Success takes over the screen — the cost breakdown is no longer the point. */
+  if (send.phase === 'success' && send.result) {
+    return (
+      <Screen>
+        <Header />
+        <View style={styles.successCard}>
+          <Display style={styles.successAmount}>
+            ${formatToken(send.result.totalAmount)}
+          </Display>
+          <Body style={styles.successMeta}>
+            sent to {send.result.recipientCount}{' '}
+            {send.result.recipientCount === 1 ? 'person' : 'people'} · fee $
+            {formatToken(send.result.feeAmount)}
+          </Body>
+          <Button
+            title="View on Basescan ↗"
+            variant="secondary"
+            style={styles.successAction}
+            onPress={() => {
+              void Linking.openURL(BASESCAN_TX_URL(send.result!.hash));
+            }}
+          />
+          <Button
+            title="Done"
+            variant="primary"
+            block
+            style={styles.successDone}
+            onPress={() => router.replace('/')}
+          />
+        </View>
+      </Screen>
+    );
+  }
 
   return (
     <Screen bottomInset={32}>
@@ -127,7 +170,7 @@ export default function ReviewScreen() {
         />
       </View>
 
-      <Stepper needsApproval={needsApproval} />
+      <Stepper needsApproval={needsApproval} phase={send.phase} />
 
       {blocker ? (
         <BlockerView
@@ -154,25 +197,54 @@ export default function ReviewScreen() {
         </View>
       ) : null}
 
+      {send.phase === 'error' && send.error ? (
+        <View style={styles.blockCard} accessibilityRole="alert">
+          <Label style={styles.blockTitle}>Payment didn't complete</Label>
+          <Body style={styles.blockBody}>{send.error}</Body>
+          {send.approveHash ? (
+            <Body style={styles.blockNote}>
+              Your approval went through, so retrying will only ask you to sign the
+              payment.
+            </Body>
+          ) : null}
+          <Button
+            title="Try again"
+            variant="secondary"
+            style={styles.errorAction}
+            onPress={() => {
+              send.reset();
+              preflight.refetch();
+            }}
+          />
+        </View>
+      ) : null}
+
       <Button
-        title={needsApproval ? 'Approve and send' : 'Send payment'}
+        title={confirmTitle(send.phase, needsApproval)}
         variant="accent"
         size="lg"
         block
         style={styles.confirm}
         disabled={!canSend}
-        loading={preflight.isLoading}
+        loading={preflight.isLoading || send.isBusy}
         onPress={() => {
-          /**
-           * Signing (approve → spray, spec §2 steps 5-6) is the next build step. The
-           * button stays inert rather than pretending to send.
-           */
+          if (totalCost === undefined) return;
+          void send.start({
+            token: token.address,
+            mode,
+            recipients,
+            amountPerRecipient,
+            amounts,
+            totalCost,
+            needsApproval,
+          });
         }}
       />
 
       <Body style={styles.footnote}>
-        1 transaction · you keep your keys
-        {needsApproval ? ' · approval first, then the payment' : ''}
+        {send.isBusy
+          ? 'Keep this screen open until it finishes.'
+          : `${needsApproval ? '2 transactions' : '1 transaction'} · you keep your keys`}
       </Body>
     </Screen>
   );
@@ -188,24 +260,69 @@ function Header() {
 }
 
 /** Spec §3.4: "Show stepper: Validate ✓ → Approve → Send". */
-function Stepper({ needsApproval }: { needsApproval: boolean }) {
+function Stepper({
+  needsApproval,
+  phase,
+}: {
+  needsApproval: boolean;
+  phase: SendPhase;
+}) {
+  const approveDone =
+    phase === 'send-signing' || phase === 'send-pending' || phase === 'success';
+  const approveActive = phase === 'approve-signing' || phase === 'approve-pending';
+  const sendActive = phase === 'send-signing' || phase === 'send-pending';
+
   return (
     <View style={styles.stepper}>
       <StepPill label="Validate" done />
-      {needsApproval ? <StepPill label="Approve" /> : null}
-      <StepPill label="Send" />
+      {needsApproval ? (
+        <StepPill label="Approve" done={approveDone} active={approveActive} />
+      ) : null}
+      <StepPill label="Send" done={phase === 'success'} active={sendActive} />
     </View>
   );
 }
 
-function StepPill({ label, done }: { label: string; done?: boolean }) {
+function StepPill({
+  label,
+  done,
+  active,
+}: {
+  label: string;
+  done?: boolean;
+  active?: boolean;
+}) {
   return (
-    <View style={[styles.pill, done && styles.pillDone]}>
-      <Label style={[styles.pillText, done && styles.pillTextDone]}>
+    <View style={[styles.pill, done && styles.pillDone, active && styles.pillActive]}>
+      <Label
+        style={[
+          styles.pillText,
+          done && styles.pillTextDone,
+          active && styles.pillTextActive,
+        ]}
+      >
         {done ? `${label} ✓` : label}
       </Label>
     </View>
   );
+}
+
+/** Names the action the wallet is about to ask for, so the prompt is never a surprise. */
+function confirmTitle(phase: SendPhase, needsApproval: boolean): string {
+  switch (phase) {
+    case 'approve-signing':
+      return 'Confirm the approval in your wallet';
+    case 'approve-pending':
+      return 'Approving…';
+    case 'send-signing':
+      return 'Confirm the payment in your wallet';
+    case 'send-pending':
+      return 'Sending…';
+    case 'error':
+      return 'Try again';
+    default:
+      return needsApproval ? 'Approve and send' : 'Send payment';
+  }
 }
 
 function CostRow({
@@ -344,8 +461,10 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   pillDone: { backgroundColor: colors.successSoft },
+  pillActive: { backgroundColor: colors.accentSoft },
   pillText: { fontSize: 13, color: colors.muted },
   pillTextDone: { color: colors.successDeep },
+  pillTextActive: { color: colors.accentDeep },
   blockCard: {
     backgroundColor: colors.dangerSoft,
     borderWidth: 2,
@@ -356,6 +475,26 @@ const styles = StyleSheet.create({
   },
   blockTitle: { color: '#7F1D1D', fontSize: 15 },
   blockBody: { color: '#7F1D1D', fontSize: 13.5, marginTop: 6, lineHeight: 20 },
+  blockNote: { color: '#7F1D1D', fontSize: 12.5, marginTop: 8, lineHeight: 18 },
+  successCard: {
+    backgroundColor: colors.surface,
+    borderWidth: 2,
+    borderColor: colors.success,
+    borderRadius: radii.xxl,
+    padding: 22,
+    marginTop: 18,
+    alignItems: 'center',
+  },
+  successAmount: { fontSize: 34, color: colors.ink },
+  successMeta: {
+    fontSize: 13.5,
+    color: colors.muted,
+    marginTop: 6,
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  successAction: { marginTop: 16 },
+  successDone: { marginTop: 10 },
   errorCard: {
     backgroundColor: colors.fill,
     borderWidth: 2,
