@@ -8,6 +8,18 @@
 import '@walletconnect/react-native-compat';
 import 'react-native-get-random-values';
 
+/**
+ * TEMPORARY wallet-connect diagnostics. Ordering is load-bearing, same as the polyfills
+ * above: this must run AFTER them (it inspects WebSocket/crypto/Buffer) and BEFORE
+ * anything imports the AppKit module, because AppKit builds its instance at module
+ * scope and its constructor is what we are trying to instrument.
+ *
+ * A bare side-effect import, not a function call — `import` statements are evaluated
+ * before the module body, so a call placed here would run too late. Remove once init
+ * is fixed.
+ */
+import '../src/wallet/diagnostics';
+
 import { useEffect } from 'react';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
