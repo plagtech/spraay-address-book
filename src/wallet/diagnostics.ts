@@ -32,6 +32,7 @@
  *   allowed window makes a correctly-signed token look expired, and the relay answers
  *   401 at the handshake — indistinguishable from a bad credential without measuring it.
  */
+import { Linking } from 'react-native';
 import * as Application from 'expo-application';
 
 import { REOWN_PROJECT_ID } from '../config/env';
@@ -165,6 +166,184 @@ async function probeHttp(label: string, url: string) {
   }
 }
 
+/**
+ * Relay JSON-RPC tags. The relay itself only moves opaque encrypted blobs, so the `tag`
+ * is the one field that says WHAT is being sent — which is exactly what distinguishes
+ * "the proposal was never published" from "it was published and nobody answered".
+ */
+const RELAY_TAGS: Record<number, string> = {
+  0: 'pairing_delete',
+  1000: 'pairing_ping/req',
+  1001: 'pairing_ping/res',
+  1100: 'session_propose/REQUEST',
+  1101: 'session_propose/RESPONSE',
+  1102: 'session_settle/req',
+  1103: 'session_settle/res',
+  1104: 'session_update/req',
+  1105: 'session_update/res',
+  1106: 'session_extend/req',
+  1108: 'session_ping/req',
+  1110: 'session_delete',
+  1112: 'session_request/REQUEST',
+  1113: 'session_request/RESPONSE',
+};
+
+const describeTag = (tag: unknown) =>
+  typeof tag === 'number' ? `${tag}${RELAY_TAGS[tag] ? ` (${RELAY_TAGS[tag]})` : ''}` : '?';
+
+/** Outstanding relay requests, so a missing response is visible rather than inferred. */
+const pendingRelayRequests = new Map<number, { method: string; tag: string; at: number }>();
+
+const shortTopic = (t: unknown) =>
+  typeof t === 'string' ? `${t.slice(0, 10)}…` : String(t);
+
+/**
+ * Decode one relay frame. Payloads are encrypted, so only envelope metadata is logged —
+ * never any attempt at plaintext.
+ */
+function logRelayFrame(id: number, direction: 'SEND' | 'RECV', raw: unknown) {
+  if (typeof raw !== 'string') {
+    console.log(tag(`ws#${id} ${direction} non-string frame (${typeof raw})`));
+    return;
+  }
+
+  let msg: Record<string, unknown>;
+  try {
+    msg = JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    console.log(tag(`ws#${id} ${direction} unparseable frame, ${raw.length} bytes`));
+    return;
+  }
+
+  const rpcId = typeof msg.id === 'number' ? msg.id : undefined;
+  const method = typeof msg.method === 'string' ? msg.method : undefined;
+  const params = (msg.params ?? {}) as Record<string, unknown>;
+
+  if (method) {
+    /** irn_subscription wraps an inbound payload from the peer. */
+    if (method === 'irn_subscription') {
+      const data = (params.data ?? {}) as Record<string, unknown>;
+      console.log(
+        tag(
+          `ws#${id} ${direction} ${method} topic=${shortTopic(data.topic)} ` +
+            `bytes=${String(data.message ?? '').length} ← INBOUND FROM PEER`,
+        ),
+      );
+      return;
+    }
+
+    const t = describeTag(params.tag);
+    console.log(
+      tag(
+        `ws#${id} ${direction} ${method} id=${rpcId} topic=${shortTopic(params.topic)} ` +
+          `tag=${t}${params.ttl ? ` ttl=${params.ttl}` : ''}`,
+      ),
+    );
+
+    if (direction === 'SEND' && rpcId !== undefined) {
+      pendingRelayRequests.set(rpcId, { method, tag: t, at: Date.now() });
+    }
+    return;
+  }
+
+  /** No method → this is a response to one of our requests. */
+  if (rpcId !== undefined) {
+    const pending = pendingRelayRequests.get(rpcId);
+    const waited = pending ? `${Date.now() - pending.at}ms` : '?';
+    const outcome = msg.error ? `ERROR ${JSON.stringify(msg.error)}` : `ok=${JSON.stringify(msg.result)}`;
+    console.log(
+      tag(
+        `ws#${id} ${direction} response id=${rpcId} ` +
+          `for=${pending?.method ?? '(unknown)'} tag=${pending?.tag ?? '?'} ` +
+          `after=${waited} ${outcome}`,
+      ),
+    );
+    pendingRelayRequests.delete(rpcId);
+    return;
+  }
+
+  console.log(tag(`ws#${id} ${direction} frame without id or method: ${raw.slice(0, 120)}`));
+}
+
+/**
+ * Report anything still unanswered. A published `session_propose` with no response is
+ * the signature of a proposal that reached the relay but that the wallet never picked
+ * up or never replied to.
+ */
+function reportPendingRelayRequests() {
+  if (pendingRelayRequests.size === 0) {
+    console.log(tag('relay: no outstanding requests'));
+    return;
+  }
+  for (const [id, p] of pendingRelayRequests) {
+    console.warn(
+      tag(
+        `relay: STILL UNANSWERED id=${id} method=${p.method} tag=${p.tag} ` +
+          `waiting ${Date.now() - p.at}ms`,
+      ),
+    );
+  }
+}
+
+/**
+ * Capture the deep link handed to the wallet.
+ *
+ * The pairing URI is the payload the wallet needs; a deep link that opens MetaMask but
+ * carries no `wc:` URI explains a wallet that opens and then sits idle, and is a
+ * completely different fault from a proposal that never reached the relay.
+ */
+function installLinkingInterceptor() {
+  const flagged = globalThis as { __SPRAAY_LINKING_INTERCEPTED__?: boolean };
+  if (flagged.__SPRAAY_LINKING_INTERCEPTED__) return;
+  flagged.__SPRAAY_LINKING_INTERCEPTED__ = true;
+
+  const original = Linking.openURL.bind(Linking);
+
+  Linking.openURL = async (url: string) => {
+    try {
+      describeDeepLink(url);
+    } catch (err) {
+      console.warn(tag(`deep link: logging failed — ${String(err)}`));
+    }
+    return original(url);
+  };
+
+  console.log(tag('Linking.openURL interceptor installed'));
+}
+
+function describeDeepLink(url: string) {
+  console.log(tag(`deep link → ${url.slice(0, 120)}${url.length > 120 ? '…' : ''}`));
+
+  /** The wc URI may be embedded raw or percent-encoded inside the wallet's scheme. */
+  const decoded = (() => {
+    try {
+      return decodeURIComponent(url);
+    } catch {
+      return url;
+    }
+  })();
+
+  const wcIndex = decoded.indexOf('wc:');
+  if (wcIndex < 0) {
+    console.warn(
+      tag('deep link: NO wc: URI present — the wallet has nothing to pair with'),
+    );
+    return;
+  }
+
+  const wcUri = decoded.slice(wcIndex);
+  const topic = wcUri.slice(3, wcUri.indexOf('@') > 0 ? wcUri.indexOf('@') : undefined);
+
+  console.log(
+    tag(
+      `deep link: wc URI present, topic=${shortTopic(topic)} ` +
+        `relay-protocol=${/relay-protocol=([^&]+)/.exec(wcUri)?.[1] ?? '(none)'} ` +
+        `symKey=${/symKey=([^&]+)/.test(wcUri) ? 'present' : 'MISSING'} ` +
+        `length=${wcUri.length}`,
+    ),
+  );
+}
+
 /** base64url → JSON. No verification — we only want the claims, not to trust them. */
 function decodeJwtPayload(jwt: string): Record<string, unknown> | undefined {
   try {
@@ -232,10 +411,32 @@ function installWebSocketInterceptor() {
       this.addEventListener('error', (e: unknown) =>
         console.log(tag(`ws#${id} [${kind}] ERROR at ${at()} — ${describeEvent(e)}`)),
       );
-      this.addEventListener('close', (e: unknown) =>
-        console.log(tag(`ws#${id} [${kind}] CLOSE at ${at()} — ${describeEvent(e)}`)),
-      );
+      this.addEventListener('close', (e: unknown) => {
+        console.log(tag(`ws#${id} [${kind}] CLOSE at ${at()} — ${describeEvent(e)}`));
+        if (isRelay) reportPendingRelayRequests();
+      });
+
+      /** Only relay traffic is decoded; Metro's HMR chatter would drown the log. */
+      if (isRelay) {
+        this.addEventListener('message', (e: unknown) => {
+          const data = (e as { data?: unknown })?.data;
+          logRelayFrame(id, 'RECV', data);
+        });
+        this.__diagId = id;
+      }
     }
+
+    /** Outbound frames are where publish/subscribe of the proposal becomes visible. */
+    send(data: unknown) {
+      if (this.__diagId !== undefined) {
+        logRelayFrame(this.__diagId, 'SEND', data);
+      }
+      // @ts-expect-error RN's send signature is wider than the DOM lib's.
+      return super.send(data);
+    }
+
+    /** Set only for relay sockets, so `send` stays silent for everything else. */
+    __diagId?: number;
   }
 
   globalThis.WebSocket = InterceptedWebSocket as unknown as typeof WebSocket;
@@ -369,6 +570,7 @@ export function installWalletDiagnostics() {
   trackUnhandledRejections();
   /** Must be installed before AppKit is imported, or its relay socket is missed. */
   installWebSocketInterceptor();
+  installLinkingInterceptor();
   reportProjectId();
   reportEnvironment();
   runTransportProbes();
