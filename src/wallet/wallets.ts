@@ -53,16 +53,23 @@ export const CUSTOM_WALLETS: CustomWallet[] = [
     /** Explorer image ids still resolve even when the listing's links do not. */
     image_id: 'a5ebc364-8f91-4200-fcc6-be81310a0000',
     /**
-     * `go.cb-w.com` is Coinbase's WALLETCONNECT universal link, yielding
-     * https://go.cb-w.com/wc?uri=… once AppKit appends the pairing uri.
+     * Native scheme, for the same reason as MetaMask: reach the app directly rather
+     * than through a web hop.
      *
-     * NOT Reown's `COINBASE_CUSTOM_WALLET.mobile_link`, which is
-     * `https://wallet.coinbase.com/wsegue` — that is the Coinbase Wallet SDK handshake
-     * endpoint, used by Reown's dedicated Coinbase connector, not by the WalletConnect
-     * pairing path. Feeding it a `wc?uri=` produces a URL Coinbase does not recognise as
-     * a pairing, which is why tapping Base did nothing.
+     * Domains checked rather than assumed:
+     *   go.cb-w.com/wc  → 200, serves a real deep-link landing page, assetlinks claims
+     *                     org.toshi. Valid, but it is still a web round trip.
+     *   base.app/wc     → 307 that STRIPS the path, redirecting to /?uri=… . The post-
+     *                     rebrand domain does not handle /wc at all, so despite being
+     *                     the current brand it is the wrong target and would silently
+     *                     drop the pairing.
+     *   wsegue          → Coinbase Wallet SDK handshake endpoint, not WalletConnect.
+     *                     This was my earlier mistake, taken from Reown's constant.
+     *
+     * `cbwallet://wc?uri=…` is Coinbase's documented WalletConnect scheme and is
+     * registered by org.toshi, which the Base App still ships as.
      */
-    mobile_link: 'https://go.cb-w.com',
+    mobile_link: 'cbwallet://',
     play_store: 'https://play.google.com/store/apps/details?id=org.toshi',
     app_store: 'https://apps.apple.com/app/id1278383455',
   },
@@ -70,28 +77,38 @@ export const CUSTOM_WALLETS: CustomWallet[] = [
     id: WALLET_IDS.metaMask,
     name: 'MetaMask',
     image_id: '5195e9db-94d8-4579-6f11-ef553be95100',
-    /** Universal link form — resolves to https://metamask.app.link/wc?uri=… */
-    mobile_link: 'https://metamask.app.link',
+    /**
+     * Native scheme, NOT the `https://metamask.app.link` universal link.
+     *
+     * That domain is Branch.io infrastructure (verified: responses set a
+     * `Domain=.app.link` cookie and are served by openresty). Branch decodes and
+     * re-encodes query parameters as it resolves a link, which corrupts the
+     * percent-encoded `wc:` uri riding in `?uri=`. MetaMask then opens, receives
+     * something it cannot parse as a pairing, and sits processing forever — exactly the
+     * observed behaviour.
+     *
+     * Trust Wallet works over a universal link because `link.trustwallet.com` is a plain
+     * domain that passes the query through untouched. The Branch hop is the difference.
+     *
+     * `metamask://wc?uri=…` reaches the app directly with the uri intact.
+     */
+    mobile_link: 'metamask://',
     play_store: 'https://play.google.com/store/apps/details?id=io.metamask',
     app_store: 'https://apps.apple.com/app/id1438144202',
   },
-  {
-    id: WALLET_IDS.phantom,
-    name: 'Phantom',
-    image_id: 'b6ec7b81-bb4f-427d-e290-7631e6e50d00',
-    /**
-     * Universal link, yielding https://phantom.app/ul/wc?uri=… — deliberately not
-     * Reown's `PHANTOM_CUSTOM_WALLET.mobile_link` of `phantom://`.
-     *
-     * A custom scheme only launches if the OS has a registered handler visible to us;
-     * on Android 11+ that is exactly the case that silently fails, and RN surfaces it as
-     * a throw which AppKit swallows into "not installed". A universal link routes
-     * through the OS app-link resolver instead and does not depend on scheme visibility.
-     */
-    mobile_link: 'https://phantom.app/ul',
-    play_store: 'https://play.google.com/store/apps/details?id=app.phantom',
-    app_store: 'https://apps.apple.com/app/id1598432977',
-  },
+  /**
+   * PHANTOM IS DELIBERATELY ABSENT.
+   *
+   * Its explorer record declares `sdks: ["sign_v1"]` and `versions: ["1"]` — Phantom
+   * supports WalletConnect v1 ONLY. AppKit speaks v2 exclusively, so no deep link can
+   * make this pair; the two sides cannot negotiate a session at all.
+   *
+   * (Its links have also moved: `phantom.app/ul` now 301s to `phantom.com/ul`, which
+   * breaks Android app-link verification on top of the protocol mismatch.)
+   *
+   * Listing it would ship a button that always fails, so it is omitted until Phantom
+   * publishes sign_v2 support. Re-check the explorer record before adding it back.
+   */
   {
     id: WALLET_IDS.trust,
     name: 'Trust Wallet',
@@ -109,6 +126,6 @@ export const CUSTOM_WALLETS: CustomWallet[] = [
 export const FEATURED_WALLET_IDS: string[] = [
   WALLET_IDS.base,
   WALLET_IDS.metaMask,
-  WALLET_IDS.phantom,
+  /** Phantom omitted — WalletConnect v1 only. See CUSTOM_WALLETS. */
   WALLET_IDS.trust,
 ];
