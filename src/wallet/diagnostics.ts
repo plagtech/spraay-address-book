@@ -25,6 +25,8 @@
  * • Relay socket. The one probe that separates "our config is wrong" from "the transport
  *   cannot open at all", and it exercises the same WebSocket the relay uses.
  */
+import * as Application from 'expo-application';
+
 import { REOWN_PROJECT_ID } from '../config/env';
 
 const CONTEXT_ID = Math.random().toString(36).slice(2, 8);
@@ -62,7 +64,25 @@ function reportProjectId() {
   console.log(
     tag(
       `projectId: present=${id.length > 0} length=${id.length} ` +
-        `prefix=${id.slice(0, 6)}… validShape=${/^[0-9a-f]{32}$/i.test(id)}`,
+        `validShape=${/^[0-9a-f]{32}$/i.test(id)}`,
+    ),
+  );
+  /**
+   * Full value on purpose. The Reown project id is NOT a secret — it identifies the app
+   * to the relay and ships in the bundle (see config/env.ts) — and printing it is what
+   * lets you compare against the dashboard when the relay rejects it.
+   */
+  console.log(tag(`projectId value: ${id}`));
+
+  /**
+   * Reown projects can restrict which app identifiers may use them. If an allowlist is
+   * configured and this package name is not on it, the relay rejects an otherwise valid
+   * id — so this is the value to check the dashboard against.
+   */
+  console.log(
+    tag(
+      `app identity: applicationId=${Application.applicationId ?? '(unknown)'} ` +
+        `name=${Application.applicationName ?? '(unknown)'}`,
     ),
   );
 }
@@ -85,44 +105,136 @@ function reportEnvironment() {
   console.log(tag(`appkit singleton already present at startup: ${Boolean(existing)}`));
 }
 
-/**
- * Open a raw socket to the relay with our projectId. Success proves the transport and
- * credentials are fine and moves suspicion into AppKit's own init; failure names the
- * cause directly (bad projectId → close code 3000-range, no network → error).
- */
-function probeRelaySocket() {
-  const url = `wss://relay.walletconnect.org/?projectId=${REOWN_PROJECT_ID}`;
-  console.log(tag('relay probe: opening…'));
+/** Dump every own property of an event — RN spreads useful detail inconsistently. */
+function describeEvent(e: unknown): string {
+  if (e === null || typeof e !== 'object') return String(e);
+  const obj = e as Record<string, unknown>;
+  const parts: string[] = [];
+  for (const k of ['code', 'reason', 'message', 'type', 'wasClean', 'isTrusted']) {
+    if (obj[k] !== undefined) parts.push(`${k}=${JSON.stringify(obj[k])}`);
+  }
+  /** Catch anything the fixed list misses without dumping circular refs. */
+  for (const k of Object.keys(obj)) {
+    if (!['code', 'reason', 'message', 'type', 'wasClean', 'isTrusted'].includes(k)) {
+      const v = obj[k];
+      if (typeof v !== 'object' && typeof v !== 'function') {
+        parts.push(`${k}=${JSON.stringify(v)}`);
+      }
+    }
+  }
+  return parts.length > 0 ? parts.join(' ') : '(no own properties)';
+}
 
+/**
+ * Open a raw relay socket and report EVERY event.
+ *
+ * The previous version settled on the first event and closed the socket, which
+ * suppressed the close frame — and the close code is the part that names the cause.
+ * The relay signals a rejected or restricted project with a close code (4xxx range)
+ * rather than a message, so an "error with no message" alone is uninformative.
+ *
+ * `label` lets the caller run the same probe with a deliberately invalid projectId, so
+ * a credential rejection can be told apart from the transport being blocked outright:
+ * identical failures for both means transport, differing failures means credentials.
+ */
+function probeRelaySocket(projectId: string, label: string) {
+  const url = `wss://relay.walletconnect.org/?projectId=${projectId}`;
   const started = Date.now();
-  let settled = false;
+  const at = () => `${Date.now() - started}ms`;
+
+  console.log(tag(`relay[${label}]: opening (projectId ${projectId.slice(0, 6)}…)`));
 
   try {
     const ws = new WebSocket(url);
 
-    const done = (what: string) => {
-      if (settled) return;
-      settled = true;
-      console.log(tag(`relay probe: ${what} after ${Date.now() - started}ms`));
+    ws.onopen = () => console.log(tag(`relay[${label}]: OPEN at ${at()}`));
+
+    /** Do NOT close here — that would suppress the close frame we are after. */
+    ws.onerror = (e: unknown) =>
+      console.log(tag(`relay[${label}]: ERROR at ${at()} — ${describeEvent(e)}`));
+
+    ws.onclose = (e: unknown) =>
+      console.log(tag(`relay[${label}]: CLOSE at ${at()} — ${describeEvent(e)}`));
+
+    setTimeout(() => {
+      console.log(
+        tag(`relay[${label}]: final readyState=${ws.readyState} at ${at()} (0=CONNECTING 1=OPEN 2=CLOSING 3=CLOSED)`),
+      );
       try {
         ws.close();
       } catch {
-        /* already closing */
+        /* already gone */
       }
-    };
-
-    ws.onopen = () => done('OPEN — transport and projectId accepted');
-    ws.onerror = (e: unknown) => {
-      const err = e as { message?: string };
-      done(`ERROR — ${err?.message ?? 'no message'}`);
-    };
-    ws.onclose = (e: { code?: number; reason?: string }) =>
-      done(`CLOSED code=${e?.code} reason=${e?.reason || '(none)'}`);
-
-    setTimeout(() => done('TIMEOUT — no open/error/close within 12s'), 12_000);
+    }, 10_000);
   } catch (err) {
-    console.warn(tag(`relay probe: threw synchronously — ${String(err)}`));
+    console.warn(tag(`relay[${label}]: threw synchronously — ${String(err)}`));
   }
+}
+
+/**
+ * HTTPS probe. Separates three cases the WebSocket cannot distinguish on its own:
+ *   • request fails outright        → network/DNS/TLS blocked
+ *   • 401/403                       → the project id is rejected or restricted
+ *   • 200                           → credentials fine, problem is WebSocket-specific
+ */
+async function probeHttp(label: string, url: string) {
+  const started = Date.now();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 10_000);
+
+  try {
+    const res = await fetch(url, { signal: controller.signal });
+    const body = await res.text().catch(() => '');
+    console.log(
+      tag(
+        `http[${label}]: status=${res.status} ${res.ok ? 'OK' : res.statusText || ''} ` +
+          `at ${Date.now() - started}ms body=${JSON.stringify(body.slice(0, 160))}`,
+      ),
+    );
+  } catch (err) {
+    const e = err as { name?: string; message?: string };
+    console.log(
+      tag(
+        `http[${label}]: FAILED at ${Date.now() - started}ms — ` +
+          `${e?.name ?? 'Error'}: ${e?.message ?? String(err)}`,
+      ),
+    );
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Reown restricts a project to an allowlist of bundle ids / package names. An Android
+ * package that is not on the list is rejected at the relay even though the id itself is
+ * valid — which looks exactly like this failure. These probes send the same id over
+ * HTTPS so the status code can say which it is.
+ */
+function runTransportProbes() {
+  const real = REOWN_PROJECT_ID;
+  /** Well-formed but certainly not a real project — the control for comparison. */
+  const bogus = '00000000000000000000000000000000';
+
+  probeRelaySocket(real, 'real');
+  /** Staggered so the two sockets' logs do not interleave confusingly. */
+  setTimeout(() => probeRelaySocket(bogus, 'bogus-control'), 3_000);
+
+  void probeHttp(
+    'explorer+projectId',
+    `https://explorer-api.walletconnect.com/v3/wallets?projectId=${real}&entries=1&page=1`,
+  );
+  void probeHttp(
+    'explorer+bogus',
+    `https://explorer-api.walletconnect.com/v3/wallets?projectId=${bogus}&entries=1&page=1`,
+  );
+  void probeHttp(
+    'rpc+projectId',
+    `https://rpc.walletconnect.org/v1/?chainId=eip155:8453&projectId=${real}`,
+  );
+  /** Plain reachability: expect 4xx (not a WS upgrade), which still proves DNS+TLS. */
+  void probeHttp('relay-https-reachability', 'https://relay.walletconnect.org');
+  /** Control for "is any outbound HTTPS working at all". */
+  void probeHttp('internet-control', 'https://cloudflare.com/cdn-cgi/trace');
 }
 
 /** Exported for clarity, but the side-effect import below is what actually runs it. */
@@ -131,7 +243,7 @@ export function installWalletDiagnostics() {
   trackUnhandledRejections();
   reportProjectId();
   reportEnvironment();
-  probeRelaySocket();
+  runTransportProbes();
 }
 
 /**
