@@ -22,8 +22,15 @@
  *   environment, so the value at runtime may differ from the one baked into the APK.
  *   An empty or malformed projectId makes the relay reject the socket.
  *
- * • Relay socket. The one probe that separates "our config is wrong" from "the transport
- *   cannot open at all", and it exercises the same WebSocket the relay uses.
+ * • WebSocket interceptor. A BARE probe socket proved nothing: the relay requires a
+ *   signed `auth` JWT, so an unsigned connection always gets 401 whatever the project
+ *   id — which is why the earlier probe failed identically for a real and a bogus id.
+ *   Only AppKit's own signed connection is evidence, so the global constructor is
+ *   wrapped before AppKit is imported to expose its real URL, JWT claims and close code.
+ *
+ * • Clock skew. The relay validates the JWT's iat/exp. A device clock outside the
+ *   allowed window makes a correctly-signed token look expired, and the relay answers
+ *   401 at the handshake — indistinguishable from a bad credential without measuring it.
  */
 import * as Application from 'expo-application';
 
@@ -126,52 +133,6 @@ function describeEvent(e: unknown): string {
 }
 
 /**
- * Open a raw relay socket and report EVERY event.
- *
- * The previous version settled on the first event and closed the socket, which
- * suppressed the close frame — and the close code is the part that names the cause.
- * The relay signals a rejected or restricted project with a close code (4xxx range)
- * rather than a message, so an "error with no message" alone is uninformative.
- *
- * `label` lets the caller run the same probe with a deliberately invalid projectId, so
- * a credential rejection can be told apart from the transport being blocked outright:
- * identical failures for both means transport, differing failures means credentials.
- */
-function probeRelaySocket(projectId: string, label: string) {
-  const url = `wss://relay.walletconnect.org/?projectId=${projectId}`;
-  const started = Date.now();
-  const at = () => `${Date.now() - started}ms`;
-
-  console.log(tag(`relay[${label}]: opening (projectId ${projectId.slice(0, 6)}…)`));
-
-  try {
-    const ws = new WebSocket(url);
-
-    ws.onopen = () => console.log(tag(`relay[${label}]: OPEN at ${at()}`));
-
-    /** Do NOT close here — that would suppress the close frame we are after. */
-    ws.onerror = (e: unknown) =>
-      console.log(tag(`relay[${label}]: ERROR at ${at()} — ${describeEvent(e)}`));
-
-    ws.onclose = (e: unknown) =>
-      console.log(tag(`relay[${label}]: CLOSE at ${at()} — ${describeEvent(e)}`));
-
-    setTimeout(() => {
-      console.log(
-        tag(`relay[${label}]: final readyState=${ws.readyState} at ${at()} (0=CONNECTING 1=OPEN 2=CLOSING 3=CLOSED)`),
-      );
-      try {
-        ws.close();
-      } catch {
-        /* already gone */
-      }
-    }, 10_000);
-  } catch (err) {
-    console.warn(tag(`relay[${label}]: threw synchronously — ${String(err)}`));
-  }
-}
-
-/**
  * HTTPS probe. Separates three cases the WebSocket cannot distinguish on its own:
  *   • request fails outright        → network/DNS/TLS blocked
  *   • 401/403                       → the project id is rejected or restricted
@@ -204,43 +165,210 @@ async function probeHttp(label: string, url: string) {
   }
 }
 
+/** base64url → JSON. No verification — we only want the claims, not to trust them. */
+function decodeJwtPayload(jwt: string): Record<string, unknown> | undefined {
+  try {
+    const part = jwt.split('.')[1];
+    if (!part) return undefined;
+    const b64 = part.replace(/-/g, '+').replace(/_/g, '/');
+    const padded = b64 + '='.repeat((4 - (b64.length % 4)) % 4);
+    const BufferCtor = (globalThis as { Buffer?: typeof Buffer }).Buffer;
+    if (!BufferCtor) return undefined;
+    return JSON.parse(BufferCtor.from(padded, 'base64').toString('utf8'));
+  } catch {
+    return undefined;
+  }
+}
+
 /**
- * Reown restricts a project to an allowlist of bundle ids / package names. An Android
- * package that is not on the list is rejected at the relay even though the id itself is
- * valid — which looks exactly like this failure. These probes send the same id over
- * HTTPS so the status code can say which it is.
+ * Intercept every WebSocket the app opens.
+ *
+ * A bare probe socket is useless here: the relay requires a signed `auth` JWT, so an
+ * unsigned connection ALWAYS gets 401 regardless of project id. That is why the earlier
+ * probe returned 401 for both the real and bogus ids — expected, and no evidence.
+ *
+ * What matters is AppKit's OWN connection, which is signed. This wraps the global
+ * constructor before AppKit is imported, so the real relay URL, its JWT claims and its
+ * close code all become visible.
+ *
+ * Uses addEventListener rather than assigning onopen/onclose, so the library's own
+ * handlers are never clobbered.
  */
+function installWebSocketInterceptor() {
+  const Original = globalThis.WebSocket;
+  if (!Original) {
+    console.warn(tag('no global WebSocket to intercept'));
+    return;
+  }
+
+  const flagged = globalThis as { __SPRAAY_WS_INTERCEPTED__?: boolean };
+  if (flagged.__SPRAAY_WS_INTERCEPTED__) return;
+  flagged.__SPRAAY_WS_INTERCEPTED__ = true;
+
+  let seq = 0;
+
+  class InterceptedWebSocket extends Original {
+    constructor(url: string, protocols?: string | string[], options?: unknown) {
+      // @ts-expect-error RN's WebSocket takes a third options argument.
+      super(url, protocols, options);
+
+      const id = ++seq;
+      const started = Date.now();
+      const at = () => `${Date.now() - started}ms`;
+
+      const isRelay = /relay\.walletconnect|walletconnect\.org|reown/i.test(url);
+      /** Metro's HMR socket is noise; name it and move on. */
+      const kind = isRelay ? 'RELAY' : 'other';
+
+      if (!isRelay) {
+        console.log(tag(`ws#${id} [${kind}] open→ ${url.slice(0, 80)}`));
+      } else {
+        describeRelayUrl(id, url);
+      }
+
+      this.addEventListener('open', () =>
+        console.log(tag(`ws#${id} [${kind}] OPEN at ${at()}`)),
+      );
+      this.addEventListener('error', (e: unknown) =>
+        console.log(tag(`ws#${id} [${kind}] ERROR at ${at()} — ${describeEvent(e)}`)),
+      );
+      this.addEventListener('close', (e: unknown) =>
+        console.log(tag(`ws#${id} [${kind}] CLOSE at ${at()} — ${describeEvent(e)}`)),
+      );
+    }
+  }
+
+  globalThis.WebSocket = InterceptedWebSocket as unknown as typeof WebSocket;
+  console.log(tag('WebSocket interceptor installed'));
+}
+
+/** Break a relay URL into the parts that decide whether the handshake is accepted. */
+function describeRelayUrl(id: number, url: string) {
+  console.log(tag(`ws#${id} [RELAY] connecting`));
+
+  const query = url.includes('?') ? url.slice(url.indexOf('?') + 1) : '';
+  const params = new Map<string, string>();
+  for (const pair of query.split('&')) {
+    const eq = pair.indexOf('=');
+    if (eq > 0) params.set(pair.slice(0, eq), decodeURIComponent(pair.slice(eq + 1)));
+  }
+
+  console.log(
+    tag(
+      `ws#${id} [RELAY] host=${url.split('?')[0]} ` +
+        `params=[${[...params.keys()].join(',')}] ` +
+        `projectId=${params.get('projectId') ?? '(none)'}`,
+    ),
+  );
+
+  const auth = params.get('auth');
+  if (!auth) {
+    /** No JWT at all means the failure is upstream of the relay: signing never ran. */
+    console.warn(tag(`ws#${id} [RELAY] NO auth JWT on the URL — signing did not happen`));
+    return;
+  }
+
+  console.log(tag(`ws#${id} [RELAY] auth JWT present, length=${auth.length}`));
+
+  const claims = decodeJwtPayload(auth);
+  if (!claims) {
+    console.warn(tag(`ws#${id} [RELAY] auth JWT payload could not be decoded`));
+    return;
+  }
+
+  const iat = typeof claims.iat === 'number' ? claims.iat : undefined;
+  const exp = typeof claims.exp === 'number' ? claims.exp : undefined;
+  const nowSec = Math.floor(Date.now() / 1000);
+
+  console.log(
+    tag(
+      `ws#${id} [RELAY] JWT iss=${String(claims.iss).slice(0, 24)}… ` +
+        `aud=${String(claims.aud)} sub=${String(claims.sub).slice(0, 16)}…`,
+    ),
+  );
+  console.log(
+    tag(
+      `ws#${id} [RELAY] JWT iat=${iat} (${iat ? new Date(iat * 1000).toISOString() : '?'}) ` +
+        `exp=${exp} (${exp ? new Date(exp * 1000).toISOString() : '?'})`,
+    ),
+  );
+  console.log(
+    tag(
+      `ws#${id} [RELAY] device now=${nowSec} (${new Date().toISOString()}) — ` +
+        `JWT already expired: ${exp !== undefined ? exp < nowSec : 'unknown'}, ` +
+        `issued in future: ${iat !== undefined ? iat > nowSec + 60 : 'unknown'}`,
+    ),
+  );
+}
+
+/**
+ * Device clock skew against real time.
+ *
+ * The relay validates the JWT's iat/exp. A device clock off by more than the allowed
+ * window makes a correctly-signed token look expired or not-yet-valid, and the relay
+ * answers 401 at the handshake — exactly the observed failure. The Date response header
+ * gives real time to within a second, which is ample to spot a meaningful skew.
+ */
+async function probeClockSkew() {
+  const started = Date.now();
+  try {
+    const res = await fetch('https://cloudflare.com/cdn-cgi/trace');
+    const finished = Date.now();
+    const dateHeader = res.headers.get('date');
+
+    if (!dateHeader) {
+      console.log(tag('clock: no Date header, cannot measure skew'));
+      return;
+    }
+
+    const serverMs = Date.parse(dateHeader);
+    /** Midpoint of the request window is the fairest local comparison point. */
+    const localMs = (started + finished) / 2;
+    const skewMs = localMs - serverMs;
+
+    console.log(
+      tag(
+        `clock: device=${new Date(localMs).toISOString()} ` +
+          `server=${new Date(serverMs).toISOString()} ` +
+          `skew=${Math.round(skewMs / 1000)}s ` +
+          `(round-trip ${finished - started}ms)`,
+      ),
+    );
+
+    if (Math.abs(skewMs) > 60_000) {
+      console.warn(
+        tag(
+          `clock: SKEW OVER 60s — this alone can make the relay reject a valid JWT ` +
+            `with 401 at the handshake.`,
+        ),
+      );
+    }
+  } catch (err) {
+    console.log(tag(`clock: skew probe failed — ${String(err)}`));
+  }
+}
+
 function runTransportProbes() {
-  const real = REOWN_PROJECT_ID;
-  /** Well-formed but certainly not a real project — the control for comparison. */
-  const bogus = '00000000000000000000000000000000';
+  /**
+   * The bare relay sockets from the previous revision are gone: unsigned connections
+   * always get 401, so they proved nothing. The interceptor above watches AppKit's real
+   * signed connection instead.
+   */
+  void probeClockSkew();
 
-  probeRelaySocket(real, 'real');
-  /** Staggered so the two sockets' logs do not interleave confusingly. */
-  setTimeout(() => probeRelaySocket(bogus, 'bogus-control'), 3_000);
-
+  /** Kept as the credential control — 200 here already confirmed the id is valid. */
   void probeHttp(
     'explorer+projectId',
-    `https://explorer-api.walletconnect.com/v3/wallets?projectId=${real}&entries=1&page=1`,
+    `https://explorer-api.walletconnect.com/v3/wallets?projectId=${REOWN_PROJECT_ID}&entries=1&page=1`,
   );
-  void probeHttp(
-    'explorer+bogus',
-    `https://explorer-api.walletconnect.com/v3/wallets?projectId=${bogus}&entries=1&page=1`,
-  );
-  void probeHttp(
-    'rpc+projectId',
-    `https://rpc.walletconnect.org/v1/?chainId=eip155:8453&projectId=${real}`,
-  );
-  /** Plain reachability: expect 4xx (not a WS upgrade), which still proves DNS+TLS. */
-  void probeHttp('relay-https-reachability', 'https://relay.walletconnect.org');
-  /** Control for "is any outbound HTTPS working at all". */
-  void probeHttp('internet-control', 'https://cloudflare.com/cdn-cgi/trace');
 }
 
 /** Exported for clarity, but the side-effect import below is what actually runs it. */
 export function installWalletDiagnostics() {
   console.log(tag('installing — JS context started'));
   trackUnhandledRejections();
+  /** Must be installed before AppKit is imported, or its relay socket is missed. */
+  installWebSocketInterceptor();
   reportProjectId();
   reportEnvironment();
   runTransportProbes();
