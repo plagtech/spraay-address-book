@@ -229,6 +229,16 @@ function logRelayFrame(id: number, direction: 'SEND' | 'RECV', raw: unknown) {
             `bytes=${String(data.message ?? '').length} ← INBOUND FROM PEER`,
         ),
       );
+      /** Any inbound peer frame means the wallet is alive and responding. */
+      if (!proposalAnswered && proposalPublishedAt !== undefined) {
+        proposalAnswered = true;
+        console.log(
+          tag(
+            `PAIRING: wallet replied ${Date.now() - proposalPublishedAt}ms after ` +
+              `session_propose was published`,
+          ),
+        );
+      }
       return;
     }
 
@@ -239,6 +249,28 @@ function logRelayFrame(id: number, direction: 'SEND' | 'RECV', raw: unknown) {
           `tag=${t}${params.ttl ? ` ttl=${params.ttl}` : ''}`,
       ),
     );
+
+    if (direction === 'SEND' && params.tag === 1100) {
+      proposalPublishedAt = Date.now();
+      proposalAnswered = false;
+      console.log(
+        tag(
+          `PAIRING: session_propose PUBLISHED to relay on topic=${shortTopic(params.topic)}`,
+        ),
+      );
+      /**
+       * The URI the wallet was given and the topic we publish on must agree, or the
+       * wallet subscribes to one channel while the proposal sits on another.
+       */
+      if (lastPairingTopic && params.topic !== lastPairingTopic) {
+        console.warn(
+          tag(
+            `PAIRING: TOPIC MISMATCH — deep link carried ${shortTopic(lastPairingTopic)} ` +
+              `but the proposal was published on ${shortTopic(params.topic)}`,
+          ),
+        );
+      }
+    }
 
     if (direction === 'SEND' && rpcId !== undefined) {
       pendingRelayRequests.set(rpcId, { method, tag: t, at: Date.now() });
@@ -312,7 +344,12 @@ function installLinkingInterceptor() {
 }
 
 function describeDeepLink(url: string) {
-  console.log(tag(`deep link → ${url.slice(0, 120)}${url.length > 120 ? '…' : ''}`));
+  /**
+   * FULL url, deliberately untruncated. The suspicion under test is that MetaMask is
+   * launched bare, and a truncated log would hide the `?uri=wc:…` payload that decides
+   * it — the previous 120-char cut could have cropped exactly the evidence needed.
+   */
+  console.log(tag(`deep link FULL (${url.length} chars) → ${url}`));
 
   /** The wc URI may be embedded raw or percent-encoded inside the wallet's scheme. */
   const decoded = (() => {
@@ -326,23 +363,84 @@ function describeDeepLink(url: string) {
   const wcIndex = decoded.indexOf('wc:');
   if (wcIndex < 0) {
     console.warn(
-      tag('deep link: NO wc: URI present — the wallet has nothing to pair with'),
+      tag(
+        'deep link: NO wc: URI EMBEDDED — MetaMask is being opened bare, with nothing ' +
+          'to pair against. This alone explains no approval prompt.',
+      ),
     );
     return;
   }
 
   const wcUri = decoded.slice(wcIndex);
-  const topic = wcUri.slice(3, wcUri.indexOf('@') > 0 ? wcUri.indexOf('@') : undefined);
+  const atIdx = wcUri.indexOf('@');
+  const topic = wcUri.slice(3, atIdx > 0 ? atIdx : undefined);
+
+  /**
+   * Full pairing URI. It contains `symKey`, which is what lets a wallet decrypt the
+   * proposal — treat this log line as sensitive. It is ephemeral (pairings expire in
+   * minutes) and this is a temporary dev diagnostic, but do not paste it publicly while
+   * the pairing is live.
+   */
+  console.log(tag(`deep link: wc URI (SENSITIVE, ephemeral) → ${wcUri}`));
 
   console.log(
     tag(
-      `deep link: wc URI present, topic=${shortTopic(topic)} ` +
+      `deep link: parsed topic=${shortTopic(topic)} ` +
         `relay-protocol=${/relay-protocol=([^&]+)/.exec(wcUri)?.[1] ?? '(none)'} ` +
         `symKey=${/symKey=([^&]+)/.test(wcUri) ? 'present' : 'MISSING'} ` +
+        `version=${wcUri.startsWith('wc:') && wcUri.includes('@2') ? '2' : '?'} ` +
         `length=${wcUri.length}`,
     ),
   );
+
+  /**
+   * Record the pairing topic so it can be compared against what we actually publish on.
+   * A URI handed to the wallet on one topic while the proposal goes out on another
+   * would pair with nothing, and is invisible unless the two are compared.
+   */
+  lastPairingTopic = typeof topic === 'string' ? topic : undefined;
+  console.log(tag(`deep link: expecting proposal traffic on topic=${shortTopic(topic)}`));
 }
+
+let lastPairingTopic: string | undefined;
+
+/**
+ * Watchdog for the "app just keeps spinning" case.
+ *
+ * Pending requests are otherwise only dumped when the socket closes — and a spinning
+ * app is precisely the case where it never does. This reports outstanding relay traffic
+ * on a timer so a proposal that was published and never answered becomes visible while
+ * it is still happening.
+ */
+function startPairingWatchdog() {
+  let ticks = 0;
+
+  const timer = setInterval(() => {
+    ticks += 1;
+
+    if (pendingRelayRequests.size > 0) {
+      reportPendingRelayRequests();
+    }
+
+    if (proposalPublishedAt !== undefined && !proposalAnswered) {
+      console.warn(
+        tag(
+          `pairing watchdog: session_propose published ${Math.round(
+            (Date.now() - proposalPublishedAt) / 1000,
+          )}s ago with NO reply from the wallet yet ` +
+            `(topic=${shortTopic(lastPairingTopic)})`,
+        ),
+      );
+    }
+
+    /** Stop after two minutes; by then the answer is whatever it is. */
+    if (ticks >= 24) clearInterval(timer);
+  }, 5_000);
+}
+
+/** Set when a tag-1100 publish goes out; cleared when any peer frame comes back. */
+let proposalPublishedAt: number | undefined;
+let proposalAnswered = false;
 
 /** base64url → JSON. No verification — we only want the claims, not to trust them. */
 function decodeJwtPayload(jwt: string): Record<string, unknown> | undefined {
@@ -571,6 +669,7 @@ export function installWalletDiagnostics() {
   /** Must be installed before AppKit is imported, or its relay socket is missed. */
   installWebSocketInterceptor();
   installLinkingInterceptor();
+  startPairingWatchdog();
   reportProjectId();
   reportEnvironment();
   runTransportProbes();
