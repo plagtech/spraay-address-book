@@ -21,6 +21,7 @@ import { base, SUPPORTED_CHAINS } from '../config/chain';
 import { APP_METADATA, HAS_REOWN_PROJECT_ID, REOWN_PROJECT_ID } from '../config/env';
 import { colors } from '../theme';
 import { appKitStorage } from './storage';
+import { CUSTOM_WALLETS, FEATURED_WALLET_IDS } from './wallets';
 
 /**
  * wagmi adapter — its `wagmiConfig` is what `<WagmiProvider>` consumes, so the
@@ -44,6 +45,15 @@ export const appKit = createAppKit({
   networks: [...SUPPORTED_CHAINS],
   defaultNetwork: base,
   storage: appKitStorage,
+  /**
+   * Declared explicitly because the explorer listings for Base and Phantom carry no
+   * mobile deep link, so AppKit filters them out of the sheet entirely — see
+   * `wallets.ts` for the verified listing data. `customWallets` supplies links we
+   * control; `featuredWalletIds` fixes the order so it does not drift with explorer
+   * ranking.
+   */
+  customWallets: CUSTOM_WALLETS,
+  featuredWalletIds: FEATURED_WALLET_IDS,
   clipboardClient: {
     setString: async (value: string) => {
       await Clipboard.setStringAsync(value);
