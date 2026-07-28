@@ -53,23 +53,23 @@ export const CUSTOM_WALLETS: CustomWallet[] = [
     /** Explorer image ids still resolve even when the listing's links do not. */
     image_id: 'a5ebc364-8f91-4200-fcc6-be81310a0000',
     /**
-     * Native scheme, for the same reason as MetaMask: reach the app directly rather
-     * than through a web hop.
+     * Universal link. Domains were checked, not assumed:
      *
-     * Domains checked rather than assumed:
-     *   go.cb-w.com/wc  → 200, serves a real deep-link landing page, assetlinks claims
-     *                     org.toshi. Valid, but it is still a web round trip.
-     *   base.app/wc     → 307 that STRIPS the path, redirecting to /?uri=… . The post-
-     *                     rebrand domain does not handle /wc at all, so despite being
-     *                     the current brand it is the wrong target and would silently
-     *                     drop the pairing.
+     *   go.cb-w.com/wc  → 200, serves a real deep-link landing page, and its
+     *                     assetlinks.json claims org.toshi — the package the Base App
+     *                     still ships as. Contrary to the theory that it stopped
+     *                     routing after the rebrand, it works.
+     *   base.app/wc     → 307 that STRIPS the path down to /?uri=… . The current brand
+     *                     domain does not handle /wc at all and would silently drop the
+     *                     pairing, so switching to it would have made things worse.
      *   wsegue          → Coinbase Wallet SDK handshake endpoint, not WalletConnect.
-     *                     This was my earlier mistake, taken from Reown's constant.
+     *                     My earlier mistake, taken from Reown's constant.
      *
-     * `cbwallet://wc?uri=…` is Coinbase's documented WalletConnect scheme and is
-     * registered by org.toshi, which the Base App still ships as.
+     * Preferred over the `cbwallet://` scheme because a universal link needs no
+     * package-visibility declaration and degrades to a web page rather than throwing
+     * when the app is absent.
      */
-    mobile_link: 'cbwallet://',
+    mobile_link: 'https://go.cb-w.com',
     play_store: 'https://play.google.com/store/apps/details?id=org.toshi',
     app_store: 'https://apps.apple.com/app/id1278383455',
   },
@@ -78,21 +78,20 @@ export const CUSTOM_WALLETS: CustomWallet[] = [
     name: 'MetaMask',
     image_id: '5195e9db-94d8-4579-6f11-ef553be95100',
     /**
-     * Native scheme, NOT the `https://metamask.app.link` universal link.
+     * Universal link, matching the explorer listing.
      *
-     * That domain is Branch.io infrastructure (verified: responses set a
-     * `Domain=.app.link` cookie and are served by openresty). Branch decodes and
-     * re-encodes query parameters as it resolves a link, which corrupts the
-     * percent-encoded `wc:` uri riding in `?uri=`. MetaMask then opens, receives
-     * something it cannot parse as a pairing, and sits processing forever — exactly the
-     * observed behaviour.
+     * A previous revision switched this to `metamask://` on the theory that
+     * `metamask.app.link` is Branch.io infrastructure that re-encodes query parameters
+     * and corrupts the `wc:` uri. That theory was TESTED AND IS FALSE: requesting the
+     * link with an encoded uri returns the identical url with no redirect, and the
+     * response body carries the uri byte-for-byte, symKey intact. The link is not
+     * mangling anything, so there was no reason to move off it — and this path is known
+     * to at least launch MetaMask, which the native scheme has not been shown to do.
      *
-     * Trust Wallet works over a universal link because `link.trustwallet.com` is a plain
-     * domain that passes the query through untouched. The Branch hop is the difference.
-     *
-     * `metamask://wc?uri=…` reaches the app directly with the uri intact.
+     * MetaMask's failure is therefore NOT the deep link. It receives the pairing and
+     * stalls afterwards, which points at the proposal fetch, not the handoff.
      */
-    mobile_link: 'metamask://',
+    mobile_link: 'https://metamask.app.link',
     play_store: 'https://play.google.com/store/apps/details?id=io.metamask',
     app_store: 'https://apps.apple.com/app/id1438144202',
   },
