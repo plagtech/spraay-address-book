@@ -53,10 +53,16 @@ export const CUSTOM_WALLETS: CustomWallet[] = [
     /** Explorer image ids still resolve even when the listing's links do not. */
     image_id: 'a5ebc364-8f91-4200-fcc6-be81310a0000',
     /**
-     * Coinbase's WalletConnect handoff endpoint. Matches Reown's own
-     * COINBASE_CUSTOM_WALLET constant rather than a guessed `cbwallet://`.
+     * `go.cb-w.com` is Coinbase's WALLETCONNECT universal link, yielding
+     * https://go.cb-w.com/wc?uri=… once AppKit appends the pairing uri.
+     *
+     * NOT Reown's `COINBASE_CUSTOM_WALLET.mobile_link`, which is
+     * `https://wallet.coinbase.com/wsegue` — that is the Coinbase Wallet SDK handshake
+     * endpoint, used by Reown's dedicated Coinbase connector, not by the WalletConnect
+     * pairing path. Feeding it a `wc?uri=` produces a URL Coinbase does not recognise as
+     * a pairing, which is why tapping Base did nothing.
      */
-    mobile_link: 'https://wallet.coinbase.com/wsegue',
+    mobile_link: 'https://go.cb-w.com',
     play_store: 'https://play.google.com/store/apps/details?id=org.toshi',
     app_store: 'https://apps.apple.com/app/id1278383455',
   },
@@ -73,7 +79,16 @@ export const CUSTOM_WALLETS: CustomWallet[] = [
     id: WALLET_IDS.phantom,
     name: 'Phantom',
     image_id: 'b6ec7b81-bb4f-427d-e290-7631e6e50d00',
-    mobile_link: 'phantom://',
+    /**
+     * Universal link, yielding https://phantom.app/ul/wc?uri=… — deliberately not
+     * Reown's `PHANTOM_CUSTOM_WALLET.mobile_link` of `phantom://`.
+     *
+     * A custom scheme only launches if the OS has a registered handler visible to us;
+     * on Android 11+ that is exactly the case that silently fails, and RN surfaces it as
+     * a throw which AppKit swallows into "not installed". A universal link routes
+     * through the OS app-link resolver instead and does not depend on scheme visibility.
+     */
+    mobile_link: 'https://phantom.app/ul',
     play_store: 'https://play.google.com/store/apps/details?id=app.phantom',
     app_store: 'https://apps.apple.com/app/id1598432977',
   },

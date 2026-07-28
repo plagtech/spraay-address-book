@@ -337,7 +337,29 @@ function installLinkingInterceptor() {
     } catch (err) {
       console.warn(tag(`deep link: logging failed — ${String(err)}`));
     }
-    return original(url);
+
+    /**
+     * The RESULT matters as much as the URL. AppKit calls this through
+     * `CoreHelperUtil.openLink`, which catches any failure and rethrows a generic
+     * LINKING_ERROR that the UI renders as "not installed" — so the real reason a
+     * wallet did not launch is destroyed before it reaches any screen. Logging it here
+     * is the only place the actual error survives.
+     */
+    const started = Date.now();
+    try {
+      const result = await original(url);
+      console.log(tag(`deep link: openURL RESOLVED after ${Date.now() - started}ms`));
+      return result;
+    } catch (err) {
+      const e = err as { message?: string; code?: string };
+      console.warn(
+        tag(
+          `deep link: openURL REJECTED after ${Date.now() - started}ms — ` +
+            `${e?.code ? `[${e.code}] ` : ''}${e?.message ?? String(err)}`,
+        ),
+      );
+      throw err;
+    }
   };
 
   console.log(tag('Linking.openURL interceptor installed'));
@@ -400,7 +422,29 @@ function describeDeepLink(url: string) {
    */
   lastPairingTopic = typeof topic === 'string' ? topic : undefined;
   console.log(tag(`deep link: expecting proposal traffic on topic=${shortTopic(topic)}`));
+
+  /**
+   * How long the pairing stays valid. If the wallet is still "processing" past this
+   * moment, it is fetching a proposal that has already expired — which looks like a
+   * hang on both sides rather than an error on either.
+   */
+  const expiryMatch = /expiryTimestamp=(\d+)/.exec(wcUri);
+  if (expiryMatch?.[1]) {
+    const expirySec = Number(expiryMatch[1]);
+    pairingExpiresAt = expirySec * 1000;
+    console.log(
+      tag(
+        `deep link: pairing expires ${new Date(pairingExpiresAt).toISOString()} ` +
+          `(in ${Math.round((pairingExpiresAt - Date.now()) / 1000)}s)`,
+      ),
+    );
+  } else {
+    pairingExpiresAt = undefined;
+    console.log(tag('deep link: no expiryTimestamp in the wc URI'));
+  }
 }
+
+let pairingExpiresAt: number | undefined;
 
 let lastPairingTopic: string | undefined;
 
@@ -423,18 +467,32 @@ function startPairingWatchdog() {
     }
 
     if (proposalPublishedAt !== undefined && !proposalAnswered) {
+      const waited = Math.round((Date.now() - proposalPublishedAt) / 1000);
+      const expiryNote =
+        pairingExpiresAt === undefined
+          ? ''
+          : Date.now() > pairingExpiresAt
+            ? ` — PAIRING HAS EXPIRED (${Math.round((Date.now() - pairingExpiresAt) / 1000)}s ago); ` +
+              `a wallet still fetching it will never succeed`
+            : ` — pairing valid for another ${Math.round((pairingExpiresAt - Date.now()) / 1000)}s`;
+
       console.warn(
         tag(
-          `pairing watchdog: session_propose published ${Math.round(
-            (Date.now() - proposalPublishedAt) / 1000,
-          )}s ago with NO reply from the wallet yet ` +
-            `(topic=${shortTopic(lastPairingTopic)})`,
+          `pairing watchdog: session_propose published ${waited}s ago with NO reply ` +
+            `(topic=${shortTopic(lastPairingTopic)})${expiryNote}`,
         ),
       );
     }
 
-    /** Stop after two minutes; by then the answer is whatever it is. */
-    if (ticks >= 24) clearInterval(timer);
+    /**
+     * Run for five minutes, not two. The wallet reportedly sits "processing", so the
+     * question is whether a reply lands late — and giving up at two minutes would
+     * answer that by assumption rather than by observation.
+     */
+    if (ticks >= 60) {
+      console.log(tag('pairing watchdog: stopping after 5 minutes'));
+      clearInterval(timer);
+    }
   }, 5_000);
 }
 
