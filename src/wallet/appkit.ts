@@ -46,11 +46,13 @@ export const appKit = createAppKit({
   defaultNetwork: base,
   storage: appKitStorage,
   /**
-   * Declared explicitly because the explorer listings for Base and Phantom carry no
-   * mobile deep link, so AppKit filters them out of the sheet entirely — see
-   * `wallets.ts` for the verified listing data. `customWallets` supplies links we
-   * control; `featuredWalletIds` fixes the order so it does not drift with explorer
-   * ranking.
+   * Declared explicitly because the explorer listing for Base carries no mobile deep
+   * link, so AppKit filters it out of the sheet entirely — see `wallets.ts` for the
+   * verified listing data. `customWallets` supplies links we control; `featuredWalletIds`
+   * fixes the order so it does not drift with explorer ranking.
+   *
+   * Base and MetaMask are declared with NATIVE SCHEMES; `walletLinking.ts` supplies the
+   * universal-link fallback that `customWallets` has no field for.
    */
   customWallets: CUSTOM_WALLETS,
   featuredWalletIds: FEATURED_WALLET_IDS,

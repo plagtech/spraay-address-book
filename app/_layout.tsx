@@ -20,6 +20,20 @@ import 'react-native-get-random-values';
  */
 import '../src/wallet/diagnostics';
 
+/**
+ * Native-scheme-first wallet launching, with the universal link as fallback.
+ *
+ * Ordering is load-bearing in BOTH directions: it must come AFTER `diagnostics` so its
+ * wrapper sits outside the diagnostic one — which is what makes the capture show the
+ * scheme attempt AND the fallback attempt as two logged openURL calls — and BEFORE
+ * anything that imports AppKit.
+ *
+ * A bare side-effect import for the same reason as the line above: `import` statements
+ * are hoisted, so a function call placed here would run after every other import had
+ * already been evaluated. Unlike the diagnostics, this one is NOT temporary.
+ */
+import '../src/wallet/walletLinking';
+
 import { useEffect } from 'react';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
@@ -35,6 +49,8 @@ import { Inter_600SemiBold } from '@expo-google-fonts/inter/600SemiBold';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { colors } from '../src/theme';
+import { loadDevFlags } from '../src/wallet/devFlags';
+import { attachProposalCapture } from '../src/wallet/proposalCapture';
 import { WalletProvider } from '../src/wallet/WalletProvider';
 
 SplashScreen.preventAutoHideAsync().catch(() => {
@@ -49,6 +65,15 @@ export default function RootLayout() {
     Inter_500Medium,
     Inter_600SemiBold,
   });
+
+  /**
+   * TEMPORARY. Flags must be read from storage before the capture attaches, since
+   * `attachProposalCapture` checks them synchronously — and both must be running before
+   * the user can reach a wallet button, which the splash screen guarantees.
+   */
+  useEffect(() => {
+    void loadDevFlags().then(attachProposalCapture);
+  }, []);
 
   useEffect(() => {
     // Reveal the app once fonts resolve. On font error we still show the app rather

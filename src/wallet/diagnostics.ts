@@ -36,6 +36,7 @@ import { Linking } from 'react-native';
 import * as Application from 'expo-application';
 
 import { REOWN_PROJECT_ID } from '../config/env';
+import { noteWalletTarget } from './proposalCapture';
 
 const CONTEXT_ID = Math.random().toString(36).slice(2, 8);
 
@@ -372,6 +373,13 @@ function describeDeepLink(url: string) {
    * it — the previous 120-char cut could have cropped exactly the evidence needed.
    */
   console.log(tag(`deep link FULL (${url.length} chars) → ${url}`));
+
+  /**
+   * The proposal payload is identical whatever the destination, so the deep link is the
+   * only place the target wallet is named. Tell the capture module which wallet this
+   * attempt is for, so its stored proposal can be compared against another wallet's.
+   */
+  noteWalletTarget(url);
 
   /** The wc URI may be embedded raw or percent-encoded inside the wallet's scheme. */
   const decoded = (() => {
