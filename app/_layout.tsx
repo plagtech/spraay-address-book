@@ -49,7 +49,6 @@ import { Inter_600SemiBold } from '@expo-google-fonts/inter/600SemiBold';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { colors } from '../src/theme';
-import { hydrateCoinbaseStorage } from '../src/wallet/coinbaseConnector';
 import { loadDevFlags } from '../src/wallet/devFlags';
 import { attachProposalCapture } from '../src/wallet/proposalCapture';
 import { WalletProvider } from '../src/wallet/WalletProvider';
@@ -74,18 +73,6 @@ export default function RootLayout() {
    */
   useEffect(() => {
     void loadDevFlags().then(attachProposalCapture);
-  }, []);
-
-  /**
-   * NOT temporary, and separate from the block above so it does not get deleted with it.
-   *
-   * The Coinbase SDK reads its cached account and chain id through a SYNCHRONOUS interface;
-   * this fills that cache from AsyncStorage. It needs to land before the first wallet tap —
-   * same splash-screen guarantee as the dev flags — or a returning Base App user is asked
-   * to approve a handshake they already approved. See `coinbaseConnector.ts`.
-   */
-  useEffect(() => {
-    void hydrateCoinbaseStorage();
   }, []);
 
   useEffect(() => {
