@@ -79,6 +79,29 @@ src/
 
 ## Notes for whoever picks this up
 
+- **A payment is never only in memory.** Dust test run 1 mined on Base — three transfers
+  and the fee, hash `0xcb617e88…c615` — and the app reported failure and wrote no history.
+  The signing flow runs while the app is BACKGROUNDED (the user is in their wallet), and a
+  backgrounded app can lose the wallet's answer to a closed relay socket, run out viem's
+  180s receipt timeout, or be killed outright. So `src/tx/pendingSend.ts` writes the batch
+  to disk *before* the wallet is asked, and `src/tx/reconcile.ts` settles that journal
+  against the chain on every launch and foreground — by receipt when the hash came back,
+  and by `SprayTokenExecuted` log scan when it did not. Two rules follow, and both are
+  load-bearing: only a *rejection or a revert* may tear the journal entry down
+  (`tx/sendErrors.ts`), and the app may only say "nothing was sent" when the wallet said
+  so. Anything else is the `unconfirmed` state, not an error.
+- **The tab bar must add `insets.bottom` by hand.** `BottomTabBar` computes the system
+  inset into its height and padding and then spreads `tabBarStyle` over the top, so a
+  literal `height` in that style silently wins (`BottomTabBar.js:100-106, 250-258`). Under
+  Android edge-to-edge that parks the tab row under the navigation bar, where the system
+  eats the touches — which is how History became untappable. `app/(tabs)/_layout.tsx` adds
+  it back; `components/Screen.tsx` then must NOT add it again inside tabs.
+- **AppKit deep-links for pairing only.** `Linking.openURL` appears nowhere in its request
+  path — `WalletConnectConnector.request` is a bare `provider.request` pass-through — so
+  nothing brings the wallet forward when you ask it to sign. `wallet/foregroundWallet.ts`
+  does it, using the wallet's own `redirect` from the session's peer metadata rather than a
+  hardcoded scheme.
+
 - **Import order is load-bearing.** `@walletconnect/react-native-compat` and
   `react-native-get-random-values` must be imported before anything that touches
   wagmi/viem. They're first in both `app/_layout.tsx` and `src/wallet/appkit.ts`.

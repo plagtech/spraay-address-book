@@ -8,7 +8,14 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { appendSend, loadHistory, newSendId } from './storage';
 import type { SendRecord } from './types';
 
-const QUERY_KEY = ['send-history'] as const;
+/**
+ * Exported because history is no longer written only from a screen: `tx/reconcile.ts` and
+ * `history/backfill.ts` both append straight to storage, from outside React, and then have
+ * to tell this cache to re-read. Anything that writes the store must invalidate this key.
+ */
+export const HISTORY_QUERY_KEY = ['send-history'] as const;
+
+const QUERY_KEY = HISTORY_QUERY_KEY;
 
 export interface UseHistory {
   /** Newest first. */

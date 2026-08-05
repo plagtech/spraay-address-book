@@ -49,6 +49,7 @@ import { Inter_600SemiBold } from '@expo-google-fonts/inter/600SemiBold';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { colors } from '../src/theme';
+import { SendRecoveryProvider } from '../src/tx/SendRecovery';
 import { loadDevFlags } from '../src/wallet/devFlags';
 import { attachProposalCapture } from '../src/wallet/proposalCapture';
 import { WalletProvider } from '../src/wallet/WalletProvider';
@@ -89,13 +90,22 @@ export default function RootLayout() {
     <SafeAreaProvider>
       <WalletProvider>
         <StatusBar style="dark" />
-        <Stack
-          screenOptions={{
-            headerShown: false,
-            contentStyle: { backgroundColor: colors.bg },
-            animation: 'slide_from_right',
-          }}
-        />
+        {/**
+         * Draws nothing. Settles any payment left outstanding — by this run or by one
+         * that was killed mid-flight — against the chain, writes it to History and shows
+         * the Success screen for it. Inside WalletProvider because it writes through the
+         * shared query cache, and wrapped around the Stack so the one instance is
+         * reachable from the screens. See `src/tx/SendRecovery.tsx`.
+         */}
+        <SendRecoveryProvider>
+          <Stack
+            screenOptions={{
+              headerShown: false,
+              contentStyle: { backgroundColor: colors.bg },
+              animation: 'slide_from_right',
+            }}
+          />
+        </SendRecoveryProvider>
       </WalletProvider>
     </SafeAreaProvider>
   );
