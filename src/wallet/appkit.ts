@@ -63,13 +63,17 @@ export const appKit = createAppKit({
    * Base App pairs over the Coinbase Wallet Mobile SDK, not WalletConnect — see
    * `coinbaseConnector.ts` for the evidence and the package choice.
    *
-   * Registering it is also what makes the Base row appear: without a connector of type
-   * `'coinbase'` here, AppKit appends `COINBASE_CUSTOM_WALLET.id` to `excludeWalletIds`
-   * itself and the row is suppressed no matter what `customWallets` says
-   * (AppKit.js:618-622). That self-managed exclusion is why we no longer pass an
-   * `excludeWalletIds` of our own: the entry it used to suppress is now the entry we want.
+   * Registering it is also what stops AppKit force-excluding the Coinbase id from the
+   * explorer results it fetches (AppKit.js:618-622). That self-managed exclusion is why we
+   * no longer pass an `excludeWalletIds` of our own: the entry it used to suppress is now
+   * the entry we want.
+   *
+   * Empty when the native module is missing from the binary — a stale dev client, or a
+   * build where autolinking failed. `coinbaseConnector.ts` degrades to `undefined` rather
+   * than throwing on import, and `CUSTOM_WALLETS` drops the Base row to match, so the app
+   * boots with a working sheet minus one wallet instead of crashing at launch.
    */
-  extraConnectors: [coinbaseConnector],
+  extraConnectors: coinbaseConnector ? [coinbaseConnector] : [],
   clipboardClient: {
     setString: async (value: string) => {
       await Clipboard.setStringAsync(value);

@@ -49,6 +49,8 @@
 import { ConstantsUtil } from '@reown/appkit-common-react-native';
 import type { AppKitConfig } from '@reown/appkit-react-native';
 
+import { HAS_COINBASE_CONNECTOR } from './coinbaseConnector';
+
 type CustomWallet = NonNullable<AppKitConfig['customWallets']>[number];
 
 /** Ids are the WalletConnect explorer ids, read from the live API — not guessed. */
@@ -73,39 +75,57 @@ export const WALLET_IDS = {
 } as const;
 
 /**
+ * Base App's row, offered only when the Coinbase SDK connector actually loaded.
+ *
+ * A binary without the native module can still run this bundle — a stale dev client, an OTA
+ * update ahead of its build, autolinking failing in some future build. On those, the row
+ * has no connector behind it: `AppKit.createConnector` finds no `'coinbase'` entry and
+ * falls back to `createWalletConnectConnector()` (AppKit.js:270-283), which puts the tap
+ * straight back into the dead spinner this whole change exists to remove.
+ *
+ * AppKit's own guard does not cover this. It appends the Coinbase id to `excludeWalletIds`
+ * when no connector is registered (AppKit.js:618-622), but that list is only forwarded to
+ * the explorer API as `exclude=` (ApiController.js:158) — `customWallets` are filtered by
+ * install state alone (ApiController.js:126-180) and sail past it. So the check has to be
+ * ours, and it is the same judgement the old `EXCLUDED_WALLET_IDS` note reached: a missing
+ * Base button beats a silently broken one.
+ */
+const BASE_APP_WALLET: CustomWallet = {
+  /**
+   * Reown's own Coinbase entry, relabelled.
+   *
+   * Spread rather than retyped so the id, the `https://wallet.coinbase.com/wsegue`
+   * handshake endpoint, the store links and the install-detection fields all come from the
+   * same constant AppKit routes on. Only the display name is ours: the app on the user's
+   * phone is called Base, and this app sends on Base.
+   *
+   * ── Why it is declared here at all ────────────────────────────────────────────
+   * Registering the connector stops AppKit force-excluding this id (AppKit.js:618-622), but
+   * nothing then ADDS the wallet — `setCustomWallets` auto-injects Phantom and Solflare and
+   * pointedly not Coinbase (AppKit.js:625-641). Left to the explorer, the row would come
+   * back link-less and be filtered out on a phone, exactly as before. Declaring it makes
+   * the row ours end to end.
+   *
+   * Deliberately NOT added to `featuredWalletIds`: those ids are sent to the explorer API
+   * (`include=`), and the entry that returns would dedupe AHEAD of this one — trading a
+   * complete entry for the link-less listing that started this whole investigation.
+   * Position comes from install detection instead: the list is assembled as
+   * [recent, installed, featured, recommended, custom] and deduped by id
+   * (all-wallet-list.tsx:32-46), and `checkInstalled` reads the `android_app_id` /
+   * `ios_schema` carried by the constant (CoreHelperUtil.ts:275-290), so on a device with
+   * Base App installed — the only device where ordering matters — it is promoted into
+   * `state.installed` and renders first with the INSTALLED badge.
+   */
+  ...ConstantsUtil.COINBASE_CUSTOM_WALLET,
+  name: 'Base',
+};
+
+/**
  * Declared in the order they should appear. Base first: it is the native wallet for the
  * chain this app sends on.
  */
 export const CUSTOM_WALLETS: CustomWallet[] = [
-  {
-    /**
-     * Reown's own Coinbase entry, relabelled.
-     *
-     * Spread rather than retyped so the id, the `https://wallet.coinbase.com/wsegue`
-     * handshake endpoint, the store links and the install-detection fields all come from
-     * the same constant AppKit routes on. Only the display name is ours: the app on the
-     * user's phone is called Base, and this app sends on Base.
-     *
-     * ── Why it is declared here at all ──────────────────────────────────────────
-     * Registering the connector stops AppKit force-excluding this id (AppKit.js:618-622),
-     * but nothing then ADDS the wallet — `setCustomWallets` auto-injects Phantom and
-     * Solflare and pointedly not Coinbase (AppKit.js:625-641). Left to the explorer, the
-     * row would come back link-less and be filtered out on a phone, exactly as before.
-     * Declaring it makes the row ours end to end.
-     *
-     * Deliberately NOT added to `featuredWalletIds`: those ids are sent to the explorer
-     * API (`include=`), and the entry that returns would dedupe AHEAD of this one — trading
-     * a complete entry for the link-less listing that started this whole investigation.
-     * Position comes from install detection instead: the list is assembled as
-     * [recent, installed, featured, recommended, custom] and deduped by id
-     * (all-wallet-list.tsx:32-46), and `checkInstalled` reads the `android_app_id` /
-     * `ios_schema` carried by the constant (CoreHelperUtil.ts:275-290), so on a device with
-     * Base App installed — the only device where ordering matters — it is promoted into
-     * `state.installed` and renders first with the INSTALLED badge.
-     */
-    ...ConstantsUtil.COINBASE_CUSTOM_WALLET,
-    name: 'Base',
-  },
+  ...(HAS_COINBASE_CONNECTOR ? [BASE_APP_WALLET] : []),
   {
     id: WALLET_IDS.metaMask,
     name: 'MetaMask',

@@ -28,11 +28,31 @@
  * never match the `connector.type === 'coinbase'` lookup. `CoinbaseConnector` here does
  * extend `WalletConnector` and passes `type: 'coinbase'` to `super`.
  */
-import type { KVStorage } from '@coinbase/wallet-mobile-sdk/build/WalletMobileSDKEVMProvider';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { CoinbaseConnector } from '@reown/appkit-coinbase-react-native';
+import type { AppKitConfig } from '@reown/appkit-react-native';
 
 import { BASE_RPC_URL } from '../config/chain';
+
+/** Shares the `[wallet-diag …]` prefix so the one line below lands in the usual capture. */
+const tag = (msg: string) => `[wallet-diag coinbase] ${msg}`;
+
+/**
+ * `KVStorage` structurally, declared here rather than imported.
+ *
+ * The real type lives at `@coinbase/wallet-mobile-sdk/build/WalletMobileSDKEVMProvider`.
+ * A type-only import of it would erase at build time and be harmless TODAY — but this
+ * module's whole contract is that nothing on the startup path reaches the SDK, and an
+ * `import type` sitting at the top is one dropped keyword away from bricking launch again.
+ * Three methods are cheap insurance.
+ */
+type CoinbaseKVStorage = {
+  set: (key: string, value: boolean | string | number | ArrayBuffer) => void;
+  getString: (key: string) => string | undefined;
+  delete: (key: string) => void;
+};
+
+/** The connector is loaded untyped through `require`; this is all AppKit needs of it. */
+type ExtraConnector = NonNullable<AppKitConfig['extraConnectors']>[number];
 
 /** Namespaced like `storage.ts` so `devReset` can tell these apart from WalletConnect keys. */
 const PREFIX = '@spraay/coinbase-sdk:';
@@ -60,7 +80,7 @@ const cache = new Map<string, string>();
  * (WalletMobileSDKEVMProvider.ts:770-794). They are what lets a returning user skip a
  * second handshake, so they do have to survive a restart: see `hydrateCoinbaseStorage`.
  */
-export const coinbaseSdkStorage: KVStorage = {
+export const coinbaseSdkStorage: CoinbaseKVStorage = {
   set(key, value) {
     /**
      * `NativeMMKV.set` accepts ArrayBuffer, which has no faithful string form. The SDK
@@ -112,19 +132,86 @@ export async function hydrateCoinbaseStorage(): Promise<void> {
 }
 
 /**
- * The connector handed to AppKit as `extraConnectors`.
+ * Build the connector, or return undefined if the native module is not in this binary.
  *
- * Safe to build at module scope: the constructor only records config. Everything native —
- * `configure()`, the provider, the intent launcher — happens in `init()`, which AppKit
- * calls at connect time (`AppKit.createConnector`, AppKit.js:270-280). So importing this
- * module does not touch the Coinbase SDK, and a device without Base App installed pays
- * nothing until the row is actually tapped.
+ * ── Why this cannot be a top-level import ───────────────────────────────────────
+ * `@coinbase/wallet-mobile-sdk` resolves its native module AT MODULE SCOPE:
  *
- * `init()` reads its callback URL from `APP_METADATA.redirect` (`universal ?? native`) and
- * THROWS if both are absent — see `src/config/env.ts`, where both are set.
+ *     // CoinbaseWalletSDKModule.ts — the whole file
+ *     export default requireNativeModule('CoinbaseWalletSDK');
+ *
+ * and the import chain `@reown/appkit-coinbase-react-native` → `CoinbaseConnector` →
+ * `CoinbaseProvider` → `@coinbase/wallet-mobile-sdk` reaches it. So merely IMPORTING the
+ * connector throws "Cannot find native module 'CoinbaseWalletSDK'" on any binary built
+ * before the module was added — which, via `appkit.ts` → `_layout.tsx`, is a crash at
+ * launch rather than a degraded wallet sheet.
+ *
+ * An earlier revision of this comment claimed importing was safe because `configure()` only
+ * runs in `init()`. The `configure()` CALL is indeed deferred; the native module LOOKUP is
+ * not, and the lookup is what throws. `require` inside the try/catch is what actually
+ * defers it.
+ *
+ * ── Why this outlives the stale dev-client that exposed it ──────────────────────
+ * A JS bundle can always outrun the binary underneath it: OTA updates, a reused dev client,
+ * or autolinking quietly failing in some future build. None of those should cost a launch.
+ * The app boots, Base App simply has no SDK connector, and one line says so.
  */
-export const coinbaseConnector = new CoinbaseConnector({
-  storage: coinbaseSdkStorage,
-  /** Pinned Base RPC (spec §1.1) for the provider's read-only calls — never guessed. */
-  jsonRpcUrl: BASE_RPC_URL,
-});
+function loadCoinbaseConnector(): ExtraConnector | undefined {
+  try {
+    /**
+     * `require`, not `import` — evaluation has to happen inside this `try`. The module is
+     * still bundled by Metro either way; what changes is WHEN it is evaluated and whether
+     * a throw is survivable. Same idiom as the lazy controller requires in `diagnostics.ts`.
+     */
+    const {
+      CoinbaseConnector,
+    } = require('@reown/appkit-coinbase-react-native') as {
+      CoinbaseConnector: new (config: {
+        storage?: CoinbaseKVStorage;
+        jsonRpcUrl?: string;
+      }) => ExtraConnector;
+    };
+
+    /**
+     * The constructor itself only records config. Everything else native — `configure()`,
+     * the provider, the intent launcher — happens in `init()`, which AppKit calls at
+     * connect time (`AppKit.createConnector`, AppKit.js:270-280), so a device without Base
+     * App installed still pays nothing until the row is actually tapped.
+     *
+     * `init()` reads its callback URL from `APP_METADATA.redirect` (`universal ?? native`)
+     * and THROWS if both are absent — see `src/config/env.ts`, where both are set.
+     */
+    return new CoinbaseConnector({
+      storage: coinbaseSdkStorage,
+      /** Pinned Base RPC (spec §1.1) for the provider's read-only calls — never guessed. */
+      jsonRpcUrl: BASE_RPC_URL,
+    });
+  } catch (err) {
+    const message = (err as { message?: string })?.message ?? String(err);
+    /**
+     * One line, unconditionally — the absent native module is the expected cause and needs
+     * no stack. Anything else is appended so an unexpected failure cannot hide behind the
+     * expected wording.
+     */
+    const unexpected = message.includes('CoinbaseWalletSDK') ? '' : ` (${message})`;
+    console.log(tag(`coinbase SDK native module absent — connector disabled.${unexpected}`));
+
+    return undefined;
+  }
+}
+
+/**
+ * The connector handed to AppKit as `extraConnectors`, or undefined on a binary without
+ * the native module.
+ *
+ * Resolved once at module scope because `appkit.ts` builds `createAppKit` at module scope
+ * and needs the answer synchronously. `wallets.ts` reads the same value to decide whether
+ * the Base row is offered at all — AppKit's own Coinbase exclusion does not cover
+ * `customWallets` (ApiController.js:126-180 filters them by install state only), so
+ * without that check a connector-less client would render a Base button that falls through
+ * to `createWalletConnectConnector()` and spins forever.
+ */
+export const coinbaseConnector: ExtraConnector | undefined = loadCoinbaseConnector();
+
+/** True when Base App can actually be paired on this binary. */
+export const HAS_COINBASE_CONNECTOR = coinbaseConnector !== undefined;
