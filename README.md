@@ -66,6 +66,9 @@ src/
     env.ts              Reown project id, gateway base URL, metadata
   wallet/
     appkit.ts           WagmiAdapter + createAppKit singleton
+    wallets.ts          the curated sheet: MetaMask + Trust, their links and ids
+    AllWalletsButtonStub.tsx  renders nothing — replaces AppKit's "All wallets" row
+    allWalletsRemoval.js      the path match metro.config.js does that swap with
     storage.ts          AsyncStorage-backed AppKit session storage
     WalletProvider.tsx  AppKitProvider → WagmiProvider → QueryClient → <AppKit/>
     useWallet.ts        the one wallet hook screens use; Base chain-switch handling
@@ -88,6 +91,12 @@ src/
   unused italics into the bundle.
 - **`createAppKit` is a singleton.** Calling it a second time returns the first instance
   and silently discards the new config, so it lives at module scope in `appkit.ts`.
+- **The connect sheet is two wallets, and "All wallets" is gone.** Scrolling the explorer
+  list crashed the app natively (black screen, nothing in Metro), so v1 cuts the surface:
+  `includeWalletIds` stops the explorer returning anything but MetaMask and Trust, and
+  `metro.config.js` swaps AppKit's unconditional "All wallets" row for a stub that renders
+  nothing. `src/wallet/AllWalletsButtonStub.tsx` has the reasoning. If exotic wallets are
+  ever asked for, the answer is a WalletConnect QR flow — not this list.
 
 ## Build progress (spec §6)
 

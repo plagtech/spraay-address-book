@@ -217,12 +217,39 @@ export const WALLET_LINK_FALLBACKS: Record<string, string> = {
 };
 
 /**
+ * THE WHOLE SHEET. Nothing outside this list can appear in the connect sheet, and nothing
+ * outside it is fetched from the explorer in the first place.
+ *
+ * Passed to AppKit as BOTH `includeWalletIds` and `featuredWalletIds` — see
+ * `FEATURED_WALLET_IDS` below for why those must stay the same array — and every explorer
+ * request AppKit makes carries it as `include=` (ApiController.ts:118, 268, 308, 345). So
+ * the sheet is curated at the SOURCE: the 500-odd other wallets are never requested, never
+ * ranked, never image-fetched.
+ *
+ * That matters beyond tidiness. `AllWalletList` composes the sheet from
+ * [recent, installed, featured, recommended, custom] (all-wallet-list.tsx:32-46), and
+ * `recommended` is four explorer wallets chosen by Reown, not by us — without this list,
+ * wallets we have never paired against would render as taps that can fail.
+ *
+ * Base is absent by design — see the note on `BASE_APP_WALLET`. Phantom too — it needs its
+ * own Connect SDK, see CUSTOM_WALLETS.
+ */
+export const CURATED_WALLET_IDS: string[] = [WALLET_IDS.metaMask, WALLET_IDS.trust];
+
+/**
  * Surfaced at the top of the sheet, so the list is deterministic instead of whatever the
  * explorer happens to rank highest today.
+ *
+ * INTENTIONALLY THE SAME LIST as `CURATED_WALLET_IDS`, and not merely equal to it by
+ * coincidence: `fetchRecommendedWallets` asks for `include=<curated>` while excluding
+ * `featuredWalletIds` (ApiController.ts:257-272). Identical lists make that request provably
+ * empty, so `state.recommended` and `state.count` stay at zero. Let the two drift and every
+ * id in one but not the other comes back as a recommended row nobody curated.
+ *
+ * The explorer's own entry for each of these still returns here — and is then OVERWRITTEN by
+ * the `CUSTOM_WALLETS` entry of the same id, because the sheet dedupes with
+ * `new Map(...)` where the last write wins (all-wallet-list.tsx:36-39). Featured decides
+ * POSITION; custom decides the LINK. That is what keeps MetaMask on `metamask://` rather
+ * than the explorer's universal link.
  */
-export const FEATURED_WALLET_IDS: string[] = [
-  /** Base is absent by design — see the note on its CUSTOM_WALLETS entry. */
-  WALLET_IDS.metaMask,
-  /** Phantom omitted — needs its own Connect SDK. See CUSTOM_WALLETS. */
-  WALLET_IDS.trust,
-];
+export const FEATURED_WALLET_IDS: string[] = CURATED_WALLET_IDS;

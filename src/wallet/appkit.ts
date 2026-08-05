@@ -22,7 +22,7 @@ import { APP_METADATA, HAS_REOWN_PROJECT_ID, REOWN_PROJECT_ID } from '../config/
 import { colors } from '../theme';
 import { coinbaseConnector } from './coinbaseConnector';
 import { appKitStorage } from './storage';
-import { CUSTOM_WALLETS, FEATURED_WALLET_IDS } from './wallets';
+import { CURATED_WALLET_IDS, CUSTOM_WALLETS, FEATURED_WALLET_IDS } from './wallets';
 
 /**
  * wagmi adapter — its `wagmiConfig` is what `<WagmiProvider>` consumes, so the
@@ -59,6 +59,17 @@ export const appKit = createAppKit({
    */
   customWallets: CUSTOM_WALLETS,
   featuredWalletIds: FEATURED_WALLET_IDS,
+  /**
+   * Closes the explorer list at the source. Every `/getWallets` request AppKit makes carries
+   * these ids as `include=`, so the curated two are the only wallets it ever fetches —
+   * no recommended rows we did not choose, and no 500-icon list to flood.
+   *
+   * Half of a pair: the "All wallets" ROW is removed at bundle time by `metro.config.js`,
+   * since AppKit renders that row unconditionally and offers no option to hide it. This
+   * setting means that even if some future AppKit view reads the explorer state directly,
+   * there is nothing in it. `AllWalletsButtonStub.tsx` carries the reasoning for both.
+   */
+  includeWalletIds: CURATED_WALLET_IDS,
   /**
    * Base App pairs over the Coinbase Wallet Mobile SDK, not WalletConnect — see
    * `coinbaseConnector.ts` for the evidence and the package choice.
