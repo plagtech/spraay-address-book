@@ -45,7 +45,8 @@
  */
 import { Linking } from 'react-native';
 
-import { WALLET_LINK_FALLBACKS } from './wallets';
+import { getDevFlags } from './devFlags';
+import { BASE_SCHEME, WALLET_LINK_FALLBACKS } from './wallets';
 
 /**
  * Tagged `wallet-diag` deliberately. The launch path has to be readable in the same
@@ -55,16 +56,23 @@ import { WALLET_LINK_FALLBACKS } from './wallets';
  */
 const tag = (msg: string) => `[wallet-diag link] ${msg}`;
 
-export type LaunchPath = 'scheme' | 'fallback' | 'passthrough';
+/** Which link FORMAT opened the wallet, independent of which was tried first. */
+export type LaunchVariant = 'scheme' | 'universal' | 'passthrough';
 
 export type LaunchRecord = {
-  path: LaunchPath;
+  variant: LaunchVariant;
+  /** Whether the winning variant was the first choice or the fallback. */
+  position: 'primary' | 'fallback';
+  /** True while the `baseUniversalFirst` experiment is inverting the order. */
+  reversed: boolean;
   /** The URL that actually opened, or the last one attempted if all failed. */
   url: string;
-  /** Present only when the scheme attempt failed and the fallback was tried. */
-  schemeError?: string;
+  /** Set when an earlier attempt failed before this one succeeded. */
+  primaryError?: string;
   atMs: number;
 };
+
+type Attempt = { variant: Exclude<LaunchVariant, 'passthrough'>; url: string };
 
 let lastLaunch: LaunchRecord | undefined;
 
@@ -100,6 +108,28 @@ const describeError = (err: unknown) => {
 };
 
 /**
+ * Decide the order to try the two link formats in.
+ *
+ * TEMPORARY BLOCK — the `baseUniversalFirst` branch is an experiment and comes out with
+ * the rest of the dev flags. The scheme-first default is the shipping behaviour and
+ * stays; if the flag is removed, delete the reversal and keep the rest of this function.
+ */
+function planAttempts(url: string, scheme: string, universalBase: string): Attempt[] {
+  const asScheme: Attempt = { variant: 'scheme', url };
+  const asUniversal: Attempt = {
+    variant: 'universal',
+    url: toFallbackUrl(url, scheme, universalBase),
+  };
+
+  const reversed = scheme === BASE_SCHEME && getDevFlags().baseUniversalFirst;
+
+  return reversed ? [asUniversal, asScheme] : [asScheme, asUniversal];
+}
+
+const isReversed = (scheme: string) =>
+  scheme === BASE_SCHEME && getDevFlags().baseUniversalFirst;
+
+/**
  * Install the wrapper.
  *
  * Exported for clarity, but the side-effect call at the bottom of this module is what
@@ -121,50 +151,98 @@ export function installWalletLinking() {
 
     /** Anything that is not one of our declared schemes is none of this module's business. */
     if (!match) {
-      lastLaunch = { path: 'passthrough', url, atMs: Date.now() };
+      lastLaunch = {
+        variant: 'passthrough',
+        position: 'primary',
+        reversed: false,
+        url,
+        atMs: Date.now(),
+      };
       return original(url);
     }
 
     const [scheme, universalBase] = match;
+    const attempts = planAttempts(url, scheme, universalBase);
+    const reversed = isReversed(scheme);
 
-    try {
-      const result = await original(url);
-      lastLaunch = { path: 'scheme', url, atMs: Date.now() };
-      console.log(tag(`PATH=scheme — ${scheme} launched, no fallback needed`));
-      return result;
-    } catch (err) {
-      const schemeError = describeError(err);
-      const fallbackUrl = toFallbackUrl(url, scheme, universalBase);
+    /**
+     * Announce the variant BEFORE launching, not after. The app is backgrounded the
+     * instant the wallet opens, and on a slow handoff the success line can land after the
+     * log has already been scrolled past — but the question this experiment answers is
+     * simply which format was sent, so that has to be recorded first either way.
+     */
+    console.log(
+      tag(
+        `VARIANT=${reversed ? 'universal-first (EXPERIMENT)' : 'scheme-first (default)'} ` +
+          `for ${scheme} — trying ${attempts.map((a) => a.variant).join(' then ')}`,
+      ),
+    );
 
-      console.warn(
-        tag(
-          `PATH=fallback — ${scheme} threw (${schemeError}); ` +
-            `retrying via universal link ${universalBase}`,
-        ),
-      );
+    let primaryError: string | undefined;
+
+    for (let i = 0; i < attempts.length; i += 1) {
+      const attempt = attempts[i]!;
+      const position = i === 0 ? 'primary' : 'fallback';
 
       try {
-        const result = await original(fallbackUrl);
-        lastLaunch = { path: 'fallback', url: fallbackUrl, schemeError, atMs: Date.now() };
-        console.log(tag(`PATH=fallback — universal link opened after ${scheme} failed`));
+        const result = await original(attempt.url);
+        lastLaunch = {
+          variant: attempt.variant,
+          position,
+          reversed,
+          url: attempt.url,
+          primaryError,
+          atMs: Date.now(),
+        };
+        console.log(
+          tag(
+            `PATH=${attempt.variant} (${position}) — opened${
+              primaryError ? ` after the ${attempts[0]!.variant} attempt failed` : ''
+            }`,
+          ),
+        );
         return result;
-      } catch (fallbackErr) {
-        lastLaunch = { path: 'fallback', url: fallbackUrl, schemeError, atMs: Date.now() };
+      } catch (err) {
+        const message = describeError(err);
+        const isLast = i === attempts.length - 1;
+
+        if (!isLast) {
+          primaryError = message;
+          console.warn(
+            tag(
+              `PATH=${attempt.variant} (${position}) threw (${message}); ` +
+                `falling back to ${attempts[i + 1]!.variant}`,
+            ),
+          );
+          continue;
+        }
+
+        lastLaunch = {
+          variant: attempt.variant,
+          position,
+          reversed,
+          url: attempt.url,
+          primaryError,
+          atMs: Date.now(),
+        };
         console.warn(
           tag(
-            `PATH=fallback — BOTH failed. scheme: ${schemeError} | ` +
-              `universal: ${describeError(fallbackErr)}`,
+            `PATH=none — every variant failed. ` +
+              `${attempts[0]!.variant}: ${primaryError ?? 'n/a'} | ${attempt.variant}: ${message}`,
           ),
         );
         /**
-         * Rethrow the FALLBACK's error, not the scheme's. AppKit converts whatever
-         * arrives into its generic LINKING_ERROR, and the universal link failing is the
-         * stronger signal — a scheme can throw merely for being unregistered, but an
-         * https link that will not open means the wallet is genuinely unreachable.
+         * Rethrow the LAST error. AppKit converts whatever arrives into its generic
+         * LINKING_ERROR, and the final failure is the stronger signal — an unregistered
+         * scheme throws cheaply, but exhausting every format means the wallet is
+         * genuinely unreachable.
          */
-        throw fallbackErr;
+        throw err;
       }
     }
+
+    /** Unreachable: the loop either returns or throws. Satisfies the type checker. */
+    throw new Error('walletLinking: no launch attempts were planned');
   };
 
   console.log(

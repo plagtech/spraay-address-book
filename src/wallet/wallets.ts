@@ -229,6 +229,13 @@ export const WALLET_LINK_FALLBACKS: Record<string, string> = {
 };
 
 /**
+ * Base App's scheme, named so the `baseUniversalFirst` experiment can target exactly one
+ * wallet. Matching on this constant rather than on "any scheme" is what keeps MetaMask
+ * and Trust out of the experiment while it runs.
+ */
+export const BASE_SCHEME = 'cbwallet://';
+
+/**
  * Surfaced at the top of the sheet, so the list is deterministic instead of whatever the
  * explorer happens to rank highest today.
  */

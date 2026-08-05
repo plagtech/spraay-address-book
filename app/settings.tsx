@@ -164,6 +164,9 @@ export default function SettingsScreen() {
 function WalletDiagnosticsPanel() {
   const [status, setStatus] = useState<string | undefined>();
   const [forceRequired, setForceRequired] = useState(getDevFlags().forceRequiredNamespaces);
+  const [baseUniversalFirst, setBaseUniversalFirst] = useState(
+    getDevFlags().baseUniversalFirst,
+  );
 
   const inspect = async () => {
     const r = await inspectWalletStorage();
@@ -207,12 +210,31 @@ function WalletDiagnosticsPanel() {
       return;
     }
     const when = `${Math.round((Date.now() - l.atMs) / 1000)}s ago`;
+    if (l.variant === 'passthrough') {
+      setStatus(`Last link was not a wallet scheme (${when}) — ${l.url.split('?')[0]}`);
+      return;
+    }
+    const order = l.reversed ? 'universal-first (experiment)' : 'scheme-first (default)';
     setStatus(
-      l.path === 'scheme'
-        ? `Native scheme opened the wallet (${when}). No fallback needed — ${l.url.split('?')[0]}`
-        : l.path === 'fallback'
-          ? `FELL BACK to the universal link (${when}). Scheme failed: ${l.schemeError ?? 'unknown'}`
-          : `Last link was not a wallet scheme (${when}) — ${l.url.split('?')[0]}`,
+      `${l.variant === 'scheme' ? 'Native scheme' : 'Universal link'} opened the wallet ` +
+        `as ${l.position} (${when}, ${order}) — ${l.url.split('?')[0]}` +
+        (l.primaryError ? `. First attempt failed: ${l.primaryError}` : ''),
+    );
+  };
+
+  /**
+   * A/B Base App's link format. Base only — MetaMask and Trust both pair and are left on
+   * their working formats, so they stay valid references while this runs.
+   */
+  const toggleBaseOrder = async () => {
+    const next = !baseUniversalFirst;
+    setBaseUniversalFirst(next);
+    await setDevFlag('baseUniversalFirst', next);
+    setStatus(
+      next
+        ? 'Base App will launch via the UNIVERSAL LINK first, cbwallet:// as fallback. ' +
+            'Takes effect on the next tap — no restart needed.'
+        : 'Base App back to cbwallet:// first (shipping order). Takes effect on the next tap.',
     );
   };
 
@@ -239,6 +261,11 @@ function WalletDiagnosticsPanel() {
           <Button title="Clear pairings" variant="secondary" onPress={() => void reset()} />
           <Button title="Diff proposals" variant="secondary" onPress={() => void diff()} />
           <Button title="Last launch" variant="secondary" onPress={launch} />
+          <Button
+            title={baseUniversalFirst ? 'Base: universal 1st' : 'Base: scheme 1st'}
+            variant="secondary"
+            onPress={() => void toggleBaseOrder()}
+          />
           <Button
             title={forceRequired ? 'requiredNS: ON' : 'requiredNS: off'}
             variant="secondary"
