@@ -147,15 +147,20 @@ export const CUSTOM_WALLETS: CustomWallet[] = [
      * `https://metamask.app.link` remains the fallback, so the launch path that was known
      * to work is still reachable — see WALLET_LINK_FALLBACKS.
      *
-     * ── Expectation, so this is not chased forever ──────────────────────────────
-     * MetaMask receives the pairing and stalls AFTER it, which points at the proposal
-     * fetch rather than the handoff — and no-prompt-after-open is a years-old documented
-     * issue on MetaMask's own forum. If the scheme does not fix it, the fault is
-     * wallet-side and we stop there rather than keep instrumenting.
+     * ── RESOLVED: the scheme fixed it ───────────────────────────────────────────
+     * VERIFIED PAIRING on device. MetaMask connects, prompts and settles from
+     * `metamask://`.
      *
-     * NOTE: unlike Base, this diagnosis is unchanged by the Coinbase SDK work. MetaMask is
-     * a genuine WalletConnect wallet; its listing carries real links. Nothing in this
-     * revision touches its configuration.
+     * This entry previously recorded an open question here — that MetaMask received the
+     * pairing and stalled after it, pointing at the proposal fetch, and that if the scheme
+     * did not fix it the fault was wallet-side. The scheme DID fix it, so that framing is
+     * gone rather than left to imply MetaMask is still unresolved. It was the misroute all
+     * along: an https link fired from inside an app being handed to the browser instead of
+     * the wallet. Same mechanism that was suspected for Base, and here it was the real one.
+     *
+     * Nothing about this depends on the Coinbase SDK work. MetaMask is a genuine
+     * WalletConnect wallet whose listing carries real links; it pairs on the WalletConnect
+     * path and always did once the link reached it.
      */
     mobile_link: 'metamask://',
     play_store: 'https://play.google.com/store/apps/details?id=io.metamask',

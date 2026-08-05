@@ -151,11 +151,16 @@ export default function SettingsScreen() {
 
 /**
  * TEMPORARY — wallet-connect diagnostics. Remove together with `src/wallet/diagnostics.ts`,
- * `devReset.ts`, `devFlags.ts` and `proposalCapture.ts` once MetaMask pairing is resolved.
+ * `devReset.ts`, `devFlags.ts` and `proposalCapture.ts`.
+ *
+ * The stated condition — MetaMask pairing resolved — is now MET: MetaMask pairs from
+ * `metamask://` and Trust from its universal link, both verified on device. This panel is
+ * living on borrowed time; see `devFlags.ts` for why it has not gone yet.
  *
  * NOT `src/wallet/walletLinking.ts`, despite the "Last launch" button reading from it.
  * That module is the shipping native-scheme-first launch path, not instrumentation —
- * deleting it would silently revert Base to universal links. Drop the button, keep it.
+ * deleting it would silently revert MetaMask to its universal link. Drop the button,
+ * keep it.
  *
  * Deliberately NOT gated on `__DEV__`: testing happens on installed EAS builds, where
  * `__DEV__` is false and a gated panel would never appear. `diagnostics.ts` already ships

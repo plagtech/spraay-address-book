@@ -1,6 +1,13 @@
 /**
- * Dev-only experiment toggles. TEMPORARY — remove with the rest of the wallet
- * diagnostics once MetaMask pairing is resolved.
+ * Dev-only experiment toggles. TEMPORARY — and the condition for removing them is now MET:
+ * MetaMask pairs from `metamask://` and Trust from its universal link, both verified on
+ * device. This file, `diagnostics.ts`, `devReset.ts` and `proposalCapture.ts` are all
+ * eligible to come out.
+ *
+ * They are kept for now only because Base App is still unsolved and a future Mobile Wallet
+ * Protocol integration is the obvious next consumer of this instrumentation. That is a
+ * reason to schedule the deletion, not to leave it unstated — nothing here ships value to
+ * a user.
  *
  * These exist so an experiment can be flipped ON A BUILT APK without a rebuild. Every
  * flag defaults to OFF, so a fresh install reproduces the shipping behaviour exactly —
