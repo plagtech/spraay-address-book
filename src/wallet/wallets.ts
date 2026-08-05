@@ -47,14 +47,47 @@ import type { AppKitConfig } from '@reown/appkit-react-native';
 
 type CustomWallet = NonNullable<AppKitConfig['customWallets']>[number];
 
+/**
+ * The WalletConnect explorer id for "Base (formerly Coinbase Wallet)".
+ *
+ * DO NOT PUT THIS IN `CUSTOM_WALLETS`. AppKit hardcodes this exact string as
+ * `ConstantsUtil.COINBASE_CUSTOM_WALLET.id`, and `WcHelpersUtil.isExternalWallet` returns
+ * true for it (HelpersUtil.ts:207-217). Any entry carrying this id — whatever its
+ * `mobile_link` says — is routed by `onWalletPress` to `ConnectingExternal` rather than
+ * `WalletConnect` (w3m-connect-view/index.tsx:37-42), and `ConnectingExternalView` never
+ * opens a deep link: it hands off to an external connector, which for 'coinbase' means
+ * the Coinbase SDK. We do not ship that connector, so the tap ends in a spinner having
+ * never called `Linking.openURL` at all. That is the "zero console output" symptom.
+ *
+ * Kept only so the explorer's own listing can be excluded — see EXCLUDED_WALLET_IDS.
+ */
+export const COINBASE_EXPLORER_ID =
+  'fd20dc426fb37566d803205b19bbc1d4096b248ac04548e3cfb6b3a38bd033aa';
+
 /** Ids are the WalletConnect explorer ids, read from the live API — not guessed. */
 export const WALLET_IDS = {
   metaMask: 'c57ca95b47569778a828d19178114f4db188b89b763c899ba0be274e97267d96',
-  /** Explorer name: "Base (formerly Coinbase Wallet)". */
-  base: 'fd20dc426fb37566d803205b19bbc1d4096b248ac04548e3cfb6b3a38bd033aa',
+  /**
+   * NOT an explorer id, and deliberately so — see COINBASE_EXPLORER_ID above. This is a
+   * local id chosen only to be distinct from AppKit's external-wallet list, which is what
+   * gets the entry routed down the normal WalletConnect path where the deep link is
+   * actually fired. Nothing sends it to the explorer API: the icon comes from the
+   * explicit `image_id`, and pairing is by wc uri, so the id only has to be unique.
+   */
+  base: 'base-app-wc',
   phantom: 'a797aa35c0fadbfc1a53e7f675162ed5226968b44a19ee3d24385c64d1d3c393',
   trust: '4622a2b2d6af1c9844944291e5e7351a6aa24cd7b23099efac1b2fd875da31a0',
 } as const;
+
+/**
+ * Suppress the explorer's own Coinbase/Base listing.
+ *
+ * Without this it comes back through `featured`/`recommended` under
+ * COINBASE_EXPLORER_ID, renders as a SECOND Base row — now that our entry no longer
+ * shares its id, the two no longer dedupe — and that row is the dead external one. One
+ * working Base button beside one silently broken one is worse than the original bug.
+ */
+export const EXCLUDED_WALLET_IDS: string[] = [COINBASE_EXPLORER_ID];
 
 /**
  * Declared in the order they should appear. Base first: it is the native wallet for the
@@ -96,6 +129,26 @@ export const CUSTOM_WALLETS: CustomWallet[] = [
     mobile_link: 'cbwallet://',
     play_store: 'https://play.google.com/store/apps/details?id=org.toshi',
     app_store: 'https://apps.apple.com/app/id1278383455',
+    /**
+     * These two are what put Base back at the top of the sheet.
+     *
+     * The list is assembled as [recent, installed, featured, recommended, custom] and
+     * deduped by id (all-wallet-list.tsx:32-46), so position comes from the FIRST list an
+     * id appears in. Base used to sit first only because its explorer id was in
+     * `featuredWalletIds` — and that id is exactly what broke the tap. With a local id it
+     * can no longer be featured, so it would otherwise render last.
+     *
+     * `checkInstalled` reads these fields (CoreHelperUtil.ts:275-290) and, when the app is
+     * present, `fetchInstalledWallets` merges the entry into `state.installed`, which is
+     * rendered ahead of featured. So on a device with Base App installed — the only device
+     * where the ordering matters — it is first again, and gains the INSTALLED badge.
+     *
+     * Detection is best-effort: it needs `global.Application.isAppInstalled`, injected by
+     * `@walletconnect/react-native-compat`. If that is unavailable the entry simply falls
+     * to the end of the list; it still launches, which is the part that matters.
+     */
+    android_app_id: 'org.toshi',
+    ios_schema: 'cbwallet://',
   },
   {
     id: WALLET_IDS.metaMask,
@@ -180,7 +233,12 @@ export const WALLET_LINK_FALLBACKS: Record<string, string> = {
  * explorer happens to rank highest today.
  */
 export const FEATURED_WALLET_IDS: string[] = [
-  WALLET_IDS.base,
+  /**
+   * Base is NOT here any more, and must not be re-added. These ids are sent to the
+   * explorer API (`include=`), so only real explorer ids belong — and Base's real
+   * explorer id is the one that routes the tap into the dead external-wallet path.
+   * Base gets its position from install detection instead; see CUSTOM_WALLETS.
+   */
   WALLET_IDS.metaMask,
   /** Phantom omitted — needs its own Connect SDK, not WalletConnect. See CUSTOM_WALLETS. */
   WALLET_IDS.trust,

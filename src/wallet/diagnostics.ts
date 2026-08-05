@@ -728,6 +728,75 @@ function runTransportProbes() {
   );
 }
 
+/**
+ * Dump the wallet entries AppKit actually holds, and how each one will be ROUTED.
+ *
+ * The field that decided the Base failure was never `mobile_link` — the rendered entry
+ * carried `cbwallet://` correctly, because the list dedupes with custom wallets last
+ * (all-wallet-list.tsx:32-46) so ours wins the merge. It was the `id`: AppKit hardcodes
+ * three ids as "external" wallets, and `onWalletPress` sends those to `ConnectingExternal`
+ * (w3m-connect-view/index.tsx:37-42), a view that hands off to an external connector and
+ * never opens a deep link. So the route, not the link, is what this prints.
+ *
+ * Runs on a delay and via lazy require: the controllers do not exist when this module is
+ * evaluated, which is deliberate — it must load before AppKit to catch its constructor.
+ */
+function reportWalletEntries() {
+  setTimeout(() => {
+    try {
+      const {
+        ApiController,
+        OptionsController,
+      } = require('@reown/appkit-core-react-native');
+      const { ConstantsUtil } = require('@reown/appkit-common-react-native');
+
+      /** The same three ids `WcHelpersUtil.isExternalWallet` checks. */
+      const externalIds: string[] = [
+        ConstantsUtil?.PHANTOM_CUSTOM_WALLET?.id,
+        ConstantsUtil?.COINBASE_CUSTOM_WALLET?.id,
+        ConstantsUtil?.SOLFLARE_CUSTOM_WALLET?.id,
+      ].filter(Boolean);
+
+      const custom = OptionsController.state.customWallets ?? [];
+      const { installed = [], featured = [], recommended = [] } = ApiController.state;
+
+      const describe = (w: Record<string, unknown>, source: string) => {
+        const isExternal = externalIds.includes(w.id as string);
+        console.log(
+          tag(
+            `wallet[${source}] name=${JSON.stringify(w.name)} id=${String(w.id).slice(0, 12)}… ` +
+              `mobile_link=${JSON.stringify(w.mobile_link ?? null)} ` +
+              `android_app_id=${JSON.stringify(w.android_app_id ?? null)} ` +
+              `route=${isExternal ? 'ConnectingExternal (NO DEEP LINK)' : 'WalletConnect'}`,
+          ),
+        );
+        if (isExternal) {
+          console.warn(
+            tag(
+              `wallet[${source}] ${String(w.name)} is on AppKit's external-wallet list. ` +
+                `Its tap will never call Linking.openURL, whatever mobile_link says.`,
+            ),
+          );
+        }
+      };
+
+      for (const w of custom) describe(w, 'custom');
+      for (const w of installed) describe(w, 'installed');
+      for (const w of featured) describe(w, 'featured');
+      for (const w of recommended) describe(w, 'recommended');
+
+      console.log(
+        tag(
+          `wallet lists: custom=${custom.length} installed=${installed.length} ` +
+            `featured=${featured.length} recommended=${recommended.length}`,
+        ),
+      );
+    } catch (err) {
+      console.warn(tag(`wallet entry dump failed: ${String(err)}`));
+    }
+  }, 8_000);
+}
+
 /** Exported for clarity, but the side-effect import below is what actually runs it. */
 export function installWalletDiagnostics() {
   console.log(tag('installing — JS context started'));
@@ -738,6 +807,7 @@ export function installWalletDiagnostics() {
   startPairingWatchdog();
   reportProjectId();
   reportEnvironment();
+  reportWalletEntries();
   runTransportProbes();
 }
 

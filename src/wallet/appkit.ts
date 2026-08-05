@@ -21,7 +21,7 @@ import { base, SUPPORTED_CHAINS } from '../config/chain';
 import { APP_METADATA, HAS_REOWN_PROJECT_ID, REOWN_PROJECT_ID } from '../config/env';
 import { colors } from '../theme';
 import { appKitStorage } from './storage';
-import { CUSTOM_WALLETS, FEATURED_WALLET_IDS } from './wallets';
+import { CUSTOM_WALLETS, EXCLUDED_WALLET_IDS, FEATURED_WALLET_IDS } from './wallets';
 
 /**
  * wagmi adapter — its `wagmiConfig` is what `<WagmiProvider>` consumes, so the
@@ -56,6 +56,12 @@ export const appKit = createAppKit({
    */
   customWallets: CUSTOM_WALLETS,
   featuredWalletIds: FEATURED_WALLET_IDS,
+  /**
+   * Keeps the explorer's own Coinbase/Base listing out of the sheet, so the only Base row
+   * is ours. Its id is on AppKit's hardcoded external-wallet list, which routes the tap
+   * away from the deep-link path entirely — see `wallets.ts`.
+   */
+  excludeWalletIds: EXCLUDED_WALLET_IDS,
   clipboardClient: {
     setString: async (value: string) => {
       await Clipboard.setStringAsync(value);
