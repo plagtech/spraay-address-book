@@ -738,6 +738,14 @@ function runTransportProbes() {
  * (w3m-connect-view/index.tsx:37-42), a view that hands off to an external connector and
  * never opens a deep link. So the route, not the link, is what this prints.
  *
+ * ── That route turned out to be RIGHT, which inverts the reading of this panel ──
+ * The external route looked like the bug and was in fact the fix: it is the only path to
+ * the Coinbase Wallet Mobile SDK, which is how Base App actually pairs. What was missing
+ * was the connector at the end of it, now registered as `extraConnectors`
+ * (see `coinbaseConnector.ts`). So when this prints Base as `ConnectingExternal`, that is
+ * the CORRECT state — the failure it originally diagnosed was the spinner behind it, not
+ * the route itself. A Base row printing as a WalletConnect route is now the bug.
+ *
  * Runs on a delay and via lazy require: the controllers do not exist when this module is
  * evaluated, which is deliberate — it must load before AppKit to catch its constructor.
  */

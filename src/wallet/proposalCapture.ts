@@ -64,12 +64,16 @@ let proposalPublishedAtMs: number | undefined;
 export function noteWalletTarget(url: string) {
   const host = /^[a-z]+:\/\/([^/?#]+)/i.exec(url)?.[1] ?? url.slice(0, 24);
   /**
-   * `cbwallet` is matched explicitly. Once Base moved to its native scheme the url became
-   * `cbwallet://wc?uri=…`, which matches NONE of the universal-link patterns — `cb-w` is
-   * hyphenated and does not occur in it — so the host fallback took over and captured
-   * every Base run under the name "wc", quietly making `diffCaptures('base', …)` find
-   * nothing. Keep a pattern here for both the scheme and the universal link of any wallet
-   * that has two launch paths.
+   * Keep a pattern for BOTH the scheme and the universal link of any wallet with two
+   * launch paths. When Base was still on `cbwallet://wc?uri=…` that url matched none of
+   * the universal-link patterns — `cb-w` is hyphenated and does not occur in it — so the
+   * host fallback captured every Base run under the name "wc" and `diffCaptures('base', …)`
+   * quietly found nothing.
+   *
+   * The Base patterns are now vestigial rather than load-bearing: Base pairs through the
+   * Coinbase SDK and never reaches `Linking.openURL`, so nothing is captured under 'base'
+   * any more. They are left in place because they cost nothing and would be needed again if
+   * a Coinbase-family wallet ever did arrive over a deep link.
    */
   const known: Array<[RegExp, string]> = [
     [/metamask/i, 'metamask'],

@@ -21,9 +21,13 @@
  * ── Why a native scheme is the primary at all ────────────────────────────────────
  * WalletConnect's mobile-linking guidance is to prefer the native scheme: an https
  * universal link fired from inside an app can be claimed by the browser instead of the
- * wallet. That misroute is exactly the Base App symptom — the same link tapped from a
- * note opens the wallet, tapped from inside the app it does not. A `cbwallet://` intent
- * has no browser to lose to.
+ * wallet. A `metamask://` intent has no browser to lose to.
+ *
+ * This module used to cover Base App as well. It no longer does, and the reason is worth
+ * keeping: no link format was ever going to work there. Base App pairs over the Coinbase
+ * Wallet Mobile SDK and never ingests a `wc:` uri, so both formats "worked" at launching
+ * it and neither could produce an approval. It now connects through
+ * `coinbaseConnector.ts`, which does not route through `Linking.openURL` at all.
  *
  * ── Why the fallback is still worth keeping ──────────────────────────────────────
  * A scheme throws when the app is absent, and then there is nothing to show the user.
@@ -45,8 +49,7 @@
  */
 import { Linking } from 'react-native';
 
-import { getDevFlags } from './devFlags';
-import { BASE_SCHEME, WALLET_LINK_FALLBACKS } from './wallets';
+import { WALLET_LINK_FALLBACKS } from './wallets';
 
 /**
  * Tagged `wallet-diag` deliberately. The launch path has to be readable in the same
@@ -63,8 +66,6 @@ export type LaunchRecord = {
   variant: LaunchVariant;
   /** Whether the winning variant was the first choice or the fallback. */
   position: 'primary' | 'fallback';
-  /** True while the `baseUniversalFirst` experiment is inverting the order. */
-  reversed: boolean;
   /** The URL that actually opened, or the last one attempted if all failed. */
   url: string;
   /** Set when an earlier attempt failed before this one succeeded. */
@@ -110,24 +111,17 @@ const describeError = (err: unknown) => {
 /**
  * Decide the order to try the two link formats in.
  *
- * TEMPORARY BLOCK — the `baseUniversalFirst` branch is an experiment and comes out with
- * the rest of the dev flags. The scheme-first default is the shipping behaviour and
- * stays; if the flag is removed, delete the reversal and keep the rest of this function.
+ * A list rather than an if/else pair: it kept the `baseUniversalFirst` A/B down to one
+ * `reverse()`, and it still earns its place — the loop below reports position
+ * (primary/fallback) and per-attempt errors uniformly however many formats there are.
+ * Scheme-first is the shipping order for every wallet in `WALLET_LINK_FALLBACKS`.
  */
 function planAttempts(url: string, scheme: string, universalBase: string): Attempt[] {
-  const asScheme: Attempt = { variant: 'scheme', url };
-  const asUniversal: Attempt = {
-    variant: 'universal',
-    url: toFallbackUrl(url, scheme, universalBase),
-  };
-
-  const reversed = scheme === BASE_SCHEME && getDevFlags().baseUniversalFirst;
-
-  return reversed ? [asUniversal, asScheme] : [asScheme, asUniversal];
+  return [
+    { variant: 'scheme', url },
+    { variant: 'universal', url: toFallbackUrl(url, scheme, universalBase) },
+  ];
 }
-
-const isReversed = (scheme: string) =>
-  scheme === BASE_SCHEME && getDevFlags().baseUniversalFirst;
 
 /**
  * Install the wrapper.
@@ -154,7 +148,6 @@ export function installWalletLinking() {
       lastLaunch = {
         variant: 'passthrough',
         position: 'primary',
-        reversed: false,
         url,
         atMs: Date.now(),
       };
@@ -163,19 +156,14 @@ export function installWalletLinking() {
 
     const [scheme, universalBase] = match;
     const attempts = planAttempts(url, scheme, universalBase);
-    const reversed = isReversed(scheme);
 
     /**
-     * Announce the variant BEFORE launching, not after. The app is backgrounded the
-     * instant the wallet opens, and on a slow handoff the success line can land after the
-     * log has already been scrolled past — but the question this experiment answers is
-     * simply which format was sent, so that has to be recorded first either way.
+     * Announce the plan BEFORE launching, not after. The app is backgrounded the instant
+     * the wallet opens, and on a slow handoff the success line can land after the log has
+     * already been scrolled past — so which format was sent has to be recorded first.
      */
     console.log(
-      tag(
-        `VARIANT=${reversed ? 'universal-first (EXPERIMENT)' : 'scheme-first (default)'} ` +
-          `for ${scheme} — trying ${attempts.map((a) => a.variant).join(' then ')}`,
-      ),
+      tag(`${scheme} — trying ${attempts.map((a) => a.variant).join(' then ')}`),
     );
 
     let primaryError: string | undefined;
@@ -189,7 +177,6 @@ export function installWalletLinking() {
         lastLaunch = {
           variant: attempt.variant,
           position,
-          reversed,
           url: attempt.url,
           primaryError,
           atMs: Date.now(),
@@ -220,7 +207,6 @@ export function installWalletLinking() {
         lastLaunch = {
           variant: attempt.variant,
           position,
-          reversed,
           url: attempt.url,
           primaryError,
           atMs: Date.now(),

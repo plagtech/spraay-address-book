@@ -26,28 +26,19 @@ export type DevFlags = {
   captureProposals: boolean;
 
   /**
-   * Reverse Base App's launch order: universal link FIRST, `cbwallet://` as the fallback.
+   * `baseUniversalFirst` USED TO LIVE HERE and is gone deliberately, not mislaid.
    *
-   * The A/B this exists for. Base App now launches from the scheme and still shows no
-   * approval prompt, which is the symptom class MetaMask had — and until the routing fix
-   * in a004088 the tap never fired a link at all, so the universal link was never
-   * genuinely tested from inside the app. Its earlier "working" evidence is all from
-   * tapping a link outside the app, which is a different code path in the wallet.
-   *
-   * Flipping the order tells us whether Base App's WalletConnect handler ingests one
-   * format and not the other, or neither — which separates a link-format fault from a
-   * proposal fault. Default OFF keeps the shipping order.
-   *
-   * Base only. MetaMask pairs from its scheme and Trust from its universal link; both are
-   * working references and neither is touched by this flag.
+   * It A/B'd Base App's `cbwallet://` scheme against its universal link. The experiment
+   * answered its question by being made irrelevant: Base App does not ingest a `wc:` uri in
+   * EITHER format, because it pairs over the Coinbase Wallet Mobile SDK. Base no longer
+   * passes through `Linking.openURL` at all, so there is no order left to flip — see
+   * `coinbaseConnector.ts`.
    */
-  baseUniversalFirst: boolean;
 };
 
 const DEFAULTS: DevFlags = {
   forceRequiredNamespaces: false,
   captureProposals: true,
-  baseUniversalFirst: false,
 };
 
 /**
