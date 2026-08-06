@@ -150,3 +150,30 @@ All three past-payment surfaces now read `+ $0.03 protocol fee`, or
 `+ <$0.01 (0.3%) protocol fee` when the fee is sub-cent. `formatRecordFee` was not
 touched — this was only the words around it. The shared receipt text also gained the
 word "protocol", which the two screens already had.
+
+#### Verified on device — 5 Aug 2026
+
+History receipts render `+ <$0.01 (0.3%) protocol fee` on both dust-run records. That
+closes the loop on the bug: the receipt detail screen opened from History is the exact
+surface that was printing `$0.00`, and both records carry a real 900-base-unit fee.
+
+## Resolved: the "Uncaught (in promise)" toast
+
+The recurring `Uncaught (in promise, id: 0) Error: No ...` toast is no longer
+reproducible as of `4279d7a` (the diagnostics strip).
+
+Verified on device, 5 Aug 2026, with a clean Metro console across:
+
+- payout composition — 2 contacts → Pay them together → Review
+- a full wallet disconnect / reconnect pairing cycle
+
+Attributed to a stale WalletConnect session artifact that the diagnostics strip
+eliminated. Worth being precise about the strength of that claim: what is established is
+that it no longer reproduces across the paths that used to trigger it. The attribution is
+inference from what changed in `4279d7a` — `proposalCapture` attached a hook to the sign
+client and `devReset` wrote to WalletConnect storage keys, either of which could leave a
+promise rejecting unhandled — rather than a root cause traced to a specific line.
+
+The practical consequence: if it ever returns, it is NOT the same bug closed by a
+different mechanism, and the first thing to check is whether the pairing storage was
+carrying state from a build that still had those modules.
