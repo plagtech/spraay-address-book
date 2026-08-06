@@ -74,3 +74,11 @@ is a claim we cannot make.
 
 Change it to `<$0.01 (0.3%)` when the fee is non-zero but rounds below a cent. The rate
 is the honest part of the disclosure at these amounts; the rounded number is not.
+
+Two surfaces render the same value through the same formatter, and both need the fix:
+
+- `app/review.tsx:157` — the review screen, where the user sees the fee before signing.
+- `src/history/receipt.ts:47` — shared receipt text. The `record.fee > 0n` guard means
+  a genuinely zero fee prints no line at all, so the bug only bites on sub-cent fees:
+  a 0.0009 fee prints "Includes $0.00 fee". Same false claim, and this one leaves the
+  app — it goes wherever the user shares the receipt.
