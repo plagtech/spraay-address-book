@@ -139,9 +139,14 @@ A test fixture had encoded the same mistake — a 10.00 payout stored as `total:
 `10_000_000n`. A rate that rounds to "0%" is now reported as no rate at all, on the same
 principle as the amount: `<$0.01` alone rather than `<$0.01 (0%)`.
 
-#### Still open: "includes" is the wrong word
+#### "includes" was the wrong word — now "+"
 
-Not changed, because it is a copy decision rather than a formatting bug. Since `total`
-excludes the fee, the sender paid `total + fee` — so "includes $0.03 protocol fee" on a
-$10.00 receipt describes the fee as being inside a number it is not inside. "plus" would
-be accurate. Applies to all three past-payment surfaces.
+Since `total` excludes the fee, the sender paid `total` AND `fee`. "Includes $0.03
+protocol fee" on a $10.00 receipt described the fee as being inside a number it is not
+inside — the same class of false claim as "$0.00", just in the copy rather than the
+figure.
+
+All three past-payment surfaces now read `+ $0.03 protocol fee`, or
+`+ <$0.01 (0.3%) protocol fee` when the fee is sub-cent. `formatRecordFee` was not
+touched — this was only the words around it. The shared receipt text also gained the
+word "protocol", which the two screens already had.

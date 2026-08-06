@@ -131,7 +131,7 @@ export default function SuccessScreen() {
         </Body>
         {fee > 0n ? (
           <Body style={styles.fee}>
-            includes {formatRecordFee(fee, total, token.decimals)} protocol fee
+            + {formatRecordFee(fee, total, token.decimals)} protocol fee
           </Body>
         ) : null}
       </View>

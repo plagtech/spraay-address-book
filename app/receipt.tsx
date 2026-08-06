@@ -75,8 +75,7 @@ export default function ReceiptScreen() {
         </Body>
         {record.fee > 0n ? (
           <Body style={styles.fee}>
-            includes {formatRecordFee(record.fee, record.total, record.decimals)}{' '}
-            protocol fee
+            + {formatRecordFee(record.fee, record.total, record.decimals)} protocol fee
           </Body>
         ) : null}
       </View>

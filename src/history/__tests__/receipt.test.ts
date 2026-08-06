@@ -57,8 +57,18 @@ describe('formatReceipt', () => {
   });
 
   it('shows the fee only when there is one', () => {
-    expect(formatReceipt(record())).toContain('$0.03 fee');
+    expect(formatReceipt(record())).toContain('+ $0.03 protocol fee');
     expect(formatReceipt(record({ fee: 0n }))).not.toContain('fee');
+  });
+
+  /**
+   * "+", not "includes". The total is the payout excluding the fee, so the sender paid
+   * both — describing the fee as inside the total misstates what was charged.
+   */
+  it('adds the fee to the total rather than claiming it is inside it', () => {
+    const text = formatReceipt(record());
+    expect(text).toContain('$10.00 USDC');
+    expect(text).not.toMatch(/includes/i);
   });
 
   /**
@@ -67,7 +77,7 @@ describe('formatReceipt', () => {
    */
   it('never claims a sub-cent fee was zero', () => {
     const text = formatReceipt(record({ total: 300_000n, fee: 900n }));
-    expect(text).toContain('Includes <$0.01 (0.3%) fee');
+    expect(text).toContain('+ <$0.01 (0.3%) protocol fee');
     expect(text).not.toContain('$0.00');
   });
 
