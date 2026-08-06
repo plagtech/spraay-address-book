@@ -66,3 +66,32 @@ export function formatTokenDisplay(value: bigint, decimals: number): string {
   const twoPlaces = fraction.padEnd(2, '0').slice(0, 2);
   return `${grouped}.${twoPlaces}`;
 }
+
+/**
+ * True when a real, non-zero amount would render as "0.00" at two decimal places.
+ *
+ * USDC has 6 decimals and the fee is 30bps, so any payout under about $3.33 produces a
+ * fee in this range — not an edge case. The dust test charged 0.0009 USDC.
+ */
+export function isSubCent(value: bigint, decimals: number): boolean {
+  if (value <= 0n || decimals <= 2) return false;
+  return value < 10n ** BigInt(decimals - 2);
+}
+
+/** Basis points → a percentage with no trailing zeros: 30 → "0.3%", 500 → "5%". */
+export function formatFeeRate(bps: number): string {
+  return `${Number((bps / 100).toFixed(2))}%`;
+}
+
+/**
+ * The protocol fee as the user should see it — and NEVER as "$0.00".
+ *
+ * Rounding a fee we do charge down to zero is a claim we cannot make: the money leaves
+ * their wallet either way. Below a cent the rate is the part of the disclosure that is
+ * still honest at that scale, so it is shown in place of a number that would read as
+ * nothing. `bps` is optional only because not every caller knows the live rate.
+ */
+export function formatFeeDisplay(value: bigint, decimals: number, bps?: number): string {
+  if (!isSubCent(value, decimals)) return `$${formatTokenDisplay(value, decimals)}`;
+  return bps === undefined ? '<$0.01' : `<$0.01 (${formatFeeRate(bps)})`;
+}

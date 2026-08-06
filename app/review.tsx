@@ -18,12 +18,14 @@ import { GasCheckCard } from '../src/components/GasCheckCard';
 import { Screen } from '../src/components/Screen';
 import { Body, Display, Eyebrow, Label, Mono } from '../src/components/Text';
 import { useContacts } from '../src/contacts/useContacts';
+import { useContractConstants } from '../src/contracts/useContractConstants';
 import { useEstimateBatch } from '../src/gateway/useEstimateBatch';
 import { useHistory } from '../src/history/useHistory';
 import { BASESCAN_TX_URL } from '../src/config/chain';
 import { DEFAULT_TOKEN } from '../src/config/tokens';
 import { colors, radii } from '../src/theme';
 import { useSendRecoveryContext } from '../src/tx/SendRecovery';
+import { formatFeeDisplay } from '../src/tx/amounts';
 import { formatEthAmount } from '../src/tx/gasPreflight';
 import { parseReviewParams, type RawReviewParams } from '../src/tx/reviewParams';
 import { useSendPreflight, type BlockerKind } from '../src/tx/useSendPreflight';
@@ -70,6 +72,13 @@ export default function ReviewScreen() {
 
   /** Hint only (spec §1.4) — the on-chain preflight above decides affordability. */
   const estimate = useEstimateBatch(batch?.recipients.length ?? 0, batch !== undefined);
+
+  /**
+   * Only for the sub-cent fee disclosure below. Cached, and falls back to the build-time
+   * literal until the read lands — acceptable here because it labels a rate rather than
+   * deciding an amount, and the amount itself always comes from the contract.
+   */
+  const { feeBps } = useContractConstants();
 
   if (!parsed.ok) {
     return (
@@ -154,7 +163,11 @@ export default function ReviewScreen() {
         <CostRow label="Subtotal" value={`$${formatToken(subtotal)}`} />
         <CostRow
           label="Protocol fee"
-          value={feeAmount !== undefined ? `$${formatToken(feeAmount)}` : '—'}
+          value={
+            feeAmount !== undefined
+              ? formatFeeDisplay(feeAmount, token.decimals, feeBps)
+              : '—'
+          }
         />
         <View style={styles.divider} />
         <CostRow

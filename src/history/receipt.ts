@@ -12,7 +12,7 @@
  * Kept pure and free of React so the rule can be tested directly.
  */
 import { BASESCAN_TX_URL } from '../config/chain';
-import { formatTokenDisplay } from '../tx/amounts';
+import { formatFeeDisplay, formatTokenDisplay } from '../tx/amounts';
 import type { SendRecord } from './types';
 
 export interface ReceiptOptions {
@@ -43,8 +43,19 @@ export function formatReceipt(record: SendRecord, options: ReceiptOptions = {}):
     `Sent $${amount} ${record.token} to ${record.recipientCount} ${people}`,
   ];
 
+  /**
+   * The `> 0n` guard means a genuinely free send prints nothing — so the only way this
+   * line can appear is when a fee was really charged, and it must never then round that
+   * fee to "$0.00". Shared text leaves the app, so a false claim here travels.
+   *
+   * The rate is derived from the record rather than from today's contract: an old
+   * receipt has to keep describing the fee that was actually taken.
+   */
   if (record.fee > 0n) {
-    lines.push(`Includes $${formatTokenDisplay(record.fee, record.decimals)} fee`);
+    const subtotal = record.total - record.fee;
+    const bps =
+      subtotal > 0n ? Number((record.fee * 10_000n) / subtotal) : undefined;
+    lines.push(`Includes ${formatFeeDisplay(record.fee, record.decimals, bps)} fee`);
   }
 
   /**

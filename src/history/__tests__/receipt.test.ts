@@ -56,6 +56,22 @@ describe('formatReceipt', () => {
   });
 
   /**
+   * Shared text leaves the phone, so a fee rounded to "$0.00" is a false claim that
+   * travels. Mirrors the dust test: 0.30 out, 0.0009 taken.
+   */
+  it('never claims a sub-cent fee was zero', () => {
+    const text = formatReceipt(record({ total: 300_900n, fee: 900n }));
+    expect(text).toContain('Includes <$0.01 (0.3%) fee');
+    expect(text).not.toContain('$0.00');
+  });
+
+  it('derives the rate from the record, not from the current contract', () => {
+    // A record written under a 1% fee keeps reporting 1%, whatever the fee is today.
+    const text = formatReceipt(record({ total: 101_000n, fee: 1_000n }));
+    expect(text).toContain('(1%)');
+  });
+
+  /**
    * The privacy rule. Receipts get pasted into group chats, and a wallet address is a
    * permanent public identifier the payee never agreed to share.
    */
