@@ -21,11 +21,7 @@ import { SUPPORT_EMAIL, WEBSITE_URL } from '../src/config/env';
 import { toCsv } from '../src/contacts/csv';
 import { useContacts } from '../src/contacts/useContacts';
 import { colors, radii } from '../src/theme';
-import { getDevFlags, setDevFlag } from '../src/wallet/devFlags';
-import { clearWalletConnectStorage, inspectWalletStorage } from '../src/wallet/devReset';
-import { diffCaptures } from '../src/wallet/proposalCapture';
 import { useWallet } from '../src/wallet/useWallet';
-import { getLastLaunch } from '../src/wallet/walletLinking';
 
 const shortAddress = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
 
@@ -138,126 +134,12 @@ export default function SettingsScreen() {
         </View>
       </View>
 
-      <WalletDiagnosticsPanel />
-
       <Body style={styles.disclosure}>
         Spraay is a non-custodial sending tool. Your funds stay in your own wallet at all
         times; Spraay prepares group transactions that you approve and sign yourself. We
         cannot access, hold, freeze, or recover your funds.
       </Body>
     </Screen>
-  );
-}
-
-/**
- * TEMPORARY — wallet-connect diagnostics. Remove together with `src/wallet/diagnostics.ts`,
- * `devReset.ts`, `devFlags.ts` and `proposalCapture.ts`.
- *
- * The stated condition — MetaMask pairing resolved — is now MET: MetaMask pairs from
- * `metamask://` and Trust from its universal link, both verified on device. This panel is
- * living on borrowed time; see `devFlags.ts` for why it has not gone yet.
- *
- * NOT `src/wallet/walletLinking.ts`, despite the "Last launch" button reading from it.
- * That module is the shipping native-scheme-first launch path, not instrumentation —
- * deleting it would silently revert MetaMask to its universal link. Drop the button,
- * keep it.
- *
- * Deliberately NOT gated on `__DEV__`: testing happens on installed EAS builds, where
- * `__DEV__` is false and a gated panel would never appear. `diagnostics.ts` already ships
- * in every build for the same reason, so these come out together.
- */
-function WalletDiagnosticsPanel() {
-  const [status, setStatus] = useState<string | undefined>();
-  const [forceRequired, setForceRequired] = useState(getDevFlags().forceRequiredNamespaces);
-
-  const inspect = async () => {
-    const r = await inspectWalletStorage();
-    const cats = Object.entries(r.byCategory)
-      .map(([k, v]) => `${k}:${v}`)
-      .join(' ');
-    setStatus(
-      `${r.removed.length} WalletConnect keys (${cats || 'none'}); ` +
-        `${r.kept.length} other keys untouched. Full list in the log.`,
-    );
-  };
-
-  const reset = async () => {
-    const r = await clearWalletConnectStorage();
-    setStatus(
-      `Cleared ${r.removed.length} keys. RESTART THE APP before connecting — the live ` +
-        `client still holds these in memory and will write them back.`,
-    );
-  };
-
-  const diff = async () => {
-    const diffs = await diffCaptures('metamask', 'trust');
-    setStatus(
-      diffs.length === 0
-        ? 'Proposals identical apart from keys/ids (or a capture is missing — check the log).'
-        : `${diffs.length} difference(s) between the MetaMask and Trust proposals. See log.`,
-    );
-  };
-
-  /**
-   * Which link actually opened the wallet on the last attempt.
-   *
-   * The same fact is logged, but the log is only reachable over a cable — and the whole
-   * point of the native-scheme change is that the failure only reproduces on a real
-   * installed build. Reading it off the device is what makes it testable where it breaks.
-   *
-   * Reports on MetaMask only now. Base connects through the Coinbase SDK and never fires
-   * `Linking.openURL`, so a Base tap leaves this reading whatever came before it.
-   */
-  const launch = () => {
-    const l = getLastLaunch();
-    if (!l) {
-      setStatus('No wallet launch yet this session. Tap a wallet, then check again.');
-      return;
-    }
-    const when = `${Math.round((Date.now() - l.atMs) / 1000)}s ago`;
-    if (l.variant === 'passthrough') {
-      setStatus(`Last link was not a wallet scheme (${when}) — ${l.url.split('?')[0]}`);
-      return;
-    }
-    setStatus(
-      `${l.variant === 'scheme' ? 'Native scheme' : 'Universal link'} opened the wallet ` +
-        `as ${l.position} (${when}) — ${l.url.split('?')[0]}` +
-        (l.primaryError ? `. First attempt failed: ${l.primaryError}` : ''),
-    );
-  };
-
-  const toggleRequired = async () => {
-    const next = !forceRequired;
-    setForceRequired(next);
-    await setDevFlag('forceRequiredNamespaces', next);
-    setStatus(
-      next
-        ? 'requiredNamespaces experiment ON. Restart the app, then connect.'
-        : 'requiredNamespaces experiment OFF (stock behaviour). Restart the app.',
-    );
-  };
-
-  return (
-    <>
-      <Eyebrow style={styles.eyebrow}>Diagnostics (temporary)</Eyebrow>
-      <View style={styles.card}>
-        <Body style={styles.meta}>
-          Wallet pairing debug tools. These never touch contacts or history.
-        </Body>
-        <View style={styles.diagActions}>
-          <Button title="Inspect storage" variant="secondary" onPress={() => void inspect()} />
-          <Button title="Clear pairings" variant="secondary" onPress={() => void reset()} />
-          <Button title="Diff proposals" variant="secondary" onPress={() => void diff()} />
-          <Button title="Last launch" variant="secondary" onPress={launch} />
-          <Button
-            title={forceRequired ? 'requiredNS: ON' : 'requiredNS: off'}
-            variant="secondary"
-            onPress={() => void toggleRequired()}
-          />
-        </View>
-        {status ? <Body style={styles.diagStatus}>{status}</Body> : null}
-      </View>
-    </>
   );
 }
 
@@ -297,8 +179,6 @@ const styles = StyleSheet.create({
   connect: { marginTop: 14 },
   exportButton: { marginTop: 12, alignSelf: 'flex-start' },
   error: { color: colors.danger, fontSize: 12.5, marginTop: 8 },
-  diagActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 12 },
-  diagStatus: { fontSize: 12, color: colors.inkSoft, lineHeight: 18, marginTop: 12 },
   row: {
     flexDirection: 'row',
     alignItems: 'center',

@@ -9,28 +9,18 @@ import '@walletconnect/react-native-compat';
 import 'react-native-get-random-values';
 
 /**
- * TEMPORARY wallet-connect diagnostics. Ordering is load-bearing, same as the polyfills
- * above: this must run AFTER them (it inspects WebSocket/crypto/Buffer) and BEFORE
- * anything imports the AppKit module, because AppKit builds its instance at module
- * scope and its constructor is what we are trying to instrument.
- *
- * A bare side-effect import, not a function call — `import` statements are evaluated
- * before the module body, so a call placed here would run too late. Remove once init
- * is fixed.
- */
-import '../src/wallet/diagnostics';
-
-/**
  * Native-scheme-first wallet launching, with the universal link as fallback.
  *
- * Ordering is load-bearing in BOTH directions: it must come AFTER `diagnostics` so its
- * wrapper sits outside the diagnostic one — which is what makes the capture show the
- * scheme attempt AND the fallback attempt as two logged openURL calls — and BEFORE
- * anything that imports AppKit.
+ * Ordering is load-bearing, same as the polyfills above: this must run AFTER them and
+ * BEFORE anything that imports AppKit, because AppKit builds its instance at module
+ * scope and this wraps `Linking.openURL` underneath it.
  *
- * A bare side-effect import for the same reason as the line above: `import` statements
- * are hoisted, so a function call placed here would run after every other import had
- * already been evaluated. Unlike the diagnostics, this one is NOT temporary.
+ * A bare side-effect import, not a function call — `import` statements are hoisted, so a
+ * call placed here would run after every other import had already been evaluated.
+ *
+ * (This slot used to hold the wallet-connect diagnostics too, immediately above this
+ * line, so their wrapper nested outside this one. They came out after the Step 7 dust
+ * test; this module is the shipping launch path and stays.)
  */
 import '../src/wallet/walletLinking';
 
@@ -50,8 +40,6 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { colors } from '../src/theme';
 import { SendRecoveryProvider } from '../src/tx/SendRecovery';
-import { loadDevFlags } from '../src/wallet/devFlags';
-import { attachProposalCapture } from '../src/wallet/proposalCapture';
 import { WalletProvider } from '../src/wallet/WalletProvider';
 
 SplashScreen.preventAutoHideAsync().catch(() => {
@@ -66,15 +54,6 @@ export default function RootLayout() {
     Inter_500Medium,
     Inter_600SemiBold,
   });
-
-  /**
-   * TEMPORARY. Flags must be read from storage before the capture attaches, since
-   * `attachProposalCapture` checks them synchronously — and both must be running before
-   * the user can reach a wallet button, which the splash screen guarantees.
-   */
-  useEffect(() => {
-    void loadDevFlags().then(attachProposalCapture);
-  }, []);
 
   useEffect(() => {
     // Reveal the app once fonts resolve. On font error we still show the app rather

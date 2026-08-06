@@ -52,10 +52,12 @@ import { Linking } from 'react-native';
 import { WALLET_LINK_FALLBACKS } from './wallets';
 
 /**
- * Tagged `wallet-diag` deliberately. The launch path has to be readable in the same
- * capture as the deep link and the relay frames — a separate tag would mean the one line
- * saying WHICH link actually opened the wallet is the one line missing from the log
- * everybody collects.
+ * Kept as `wallet-diag` after the diagnostics modules came out. The tag no longer groups
+ * this with relay-frame logging, but it is what every note, log capture and support
+ * thread greps for, and renaming it would strand all of them to no benefit.
+ *
+ * These lines stay in shipping builds on purpose: which link format opened the wallet is
+ * the first question when a pairing fails on someone else's handset.
  */
 const tag = (msg: string) => `[wallet-diag link] ${msg}`;
 
@@ -77,7 +79,11 @@ type Attempt = { variant: Exclude<LaunchVariant, 'passthrough'>; url: string };
 
 let lastLaunch: LaunchRecord | undefined;
 
-/** Read by Settings → Diagnostics → "Last launch"; also handy from the debugger. */
+/**
+ * No UI reads this since the Diagnostics panel was removed — it is kept as a debugger
+ * handle, because the launch record is the one piece of state that says which format
+ * won and it costs nothing to hold.
+ */
 export function getLastLaunch(): LaunchRecord | undefined {
   return lastLaunch;
 }
@@ -127,11 +133,8 @@ function planAttempts(url: string, scheme: string, universalBase: string): Attem
  * Install the wrapper.
  *
  * Exported for clarity, but the side-effect call at the bottom of this module is what
- * actually runs it — `_layout.tsx` imports this module bare, AFTER `diagnostics`, so
- * that this wrapper sits OUTSIDE the diagnostic one. A fallback then runs as two separate
- * calls through the diagnostic hook, and the capture shows the full URL, timing and
- * outcome of BOTH the scheme attempt and the fallback — rather than only the first, which
- * is the one that failed.
+ * actually runs it — `_layout.tsx` imports this module bare so the wrapper is installed
+ * before anything can import AppKit and capture the unwrapped `Linking.openURL`.
  */
 export function installWalletLinking() {
   const flagged = globalThis as { __SPRAAY_WALLET_LINKING__?: boolean };
