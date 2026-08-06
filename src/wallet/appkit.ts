@@ -20,8 +20,9 @@ import * as Clipboard from 'expo-clipboard';
 import { base, SUPPORTED_CHAINS } from '../config/chain';
 import { APP_METADATA, HAS_REOWN_PROJECT_ID, REOWN_PROJECT_ID } from '../config/env';
 import { colors } from '../theme';
+import { coinbaseConnector } from './coinbaseConnector';
 import { appKitStorage } from './storage';
-import { CUSTOM_WALLETS, FEATURED_WALLET_IDS } from './wallets';
+import { CURATED_WALLET_IDS, CUSTOM_WALLETS, FEATURED_WALLET_IDS } from './wallets';
 
 /**
  * wagmi adapter — its `wagmiConfig` is what `<WagmiProvider>` consumes, so the
@@ -46,14 +47,44 @@ export const appKit = createAppKit({
   defaultNetwork: base,
   storage: appKitStorage,
   /**
-   * Declared explicitly because the explorer listings for Base and Phantom carry no
-   * mobile deep link, so AppKit filters them out of the sheet entirely — see
-   * `wallets.ts` for the verified listing data. `customWallets` supplies links we
+   * Declared explicitly because the explorer listings for Base and (historically) others
+   * carry no usable mobile deep link, so AppKit filters them out of the sheet entirely —
+   * see `wallets.ts` for the verified listing data. `customWallets` supplies entries we
    * control; `featuredWalletIds` fixes the order so it does not drift with explorer
    * ranking.
+   *
+   * MetaMask is declared with a NATIVE SCHEME; `walletLinking.ts` supplies the
+   * universal-link fallback that `customWallets` has no field for. Base is not a
+   * WalletConnect wallet at all — its entry routes to `coinbaseConnector` below.
    */
   customWallets: CUSTOM_WALLETS,
   featuredWalletIds: FEATURED_WALLET_IDS,
+  /**
+   * Closes the explorer list at the source. Every `/getWallets` request AppKit makes carries
+   * these ids as `include=`, so the curated two are the only wallets it ever fetches —
+   * no recommended rows we did not choose, and no 500-icon list to flood.
+   *
+   * Half of a pair: the "All wallets" ROW is removed at bundle time by `metro.config.js`,
+   * since AppKit renders that row unconditionally and offers no option to hide it. This
+   * setting means that even if some future AppKit view reads the explorer state directly,
+   * there is nothing in it. `AllWalletsButtonStub.tsx` carries the reasoning for both.
+   */
+  includeWalletIds: CURATED_WALLET_IDS,
+  /**
+   * Base App pairs over the Coinbase Wallet Mobile SDK, not WalletConnect — see
+   * `coinbaseConnector.ts` for the evidence and the package choice.
+   *
+   * Registering it is also what stops AppKit force-excluding the Coinbase id from the
+   * explorer results it fetches (AppKit.js:618-622). That self-managed exclusion is why we
+   * no longer pass an `excludeWalletIds` of our own: the entry it used to suppress is now
+   * the entry we want.
+   *
+   * Empty when the native module is missing from the binary — a stale dev client, or a
+   * build where autolinking failed. `coinbaseConnector.ts` degrades to `undefined` rather
+   * than throwing on import, and `CUSTOM_WALLETS` drops the Base row to match, so the app
+   * boots with a working sheet minus one wallet instead of crashing at launch.
+   */
+  extraConnectors: coinbaseConnector ? [coinbaseConnector] : [],
   clipboardClient: {
     setString: async (value: string) => {
       await Clipboard.setStringAsync(value);

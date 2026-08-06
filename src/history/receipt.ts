@@ -12,7 +12,7 @@
  * Kept pure and free of React so the rule can be tested directly.
  */
 import { BASESCAN_TX_URL } from '../config/chain';
-import { formatTokenDisplay } from '../tx/amounts';
+import { formatRecordFee, formatTokenDisplay } from '../tx/amounts';
 import type { SendRecord } from './types';
 
 export interface ReceiptOptions {
@@ -43,8 +43,18 @@ export function formatReceipt(record: SendRecord, options: ReceiptOptions = {}):
     `Sent $${amount} ${record.token} to ${record.recipientCount} ${people}`,
   ];
 
+  /**
+   * The `> 0n` guard means a genuinely free send prints nothing — so the only way this
+   * line can appear is when a fee was really charged, and it must never then round that
+   * fee to "$0.00". Shared text leaves the app, so a false claim here travels.
+   *
+   * "+" rather than "includes": `total` is the payout excluding the fee, so the sender
+   * paid total AND fee. "Includes" put the fee inside a number it is not inside.
+   */
   if (record.fee > 0n) {
-    lines.push(`Includes $${formatTokenDisplay(record.fee, record.decimals)} fee`);
+    lines.push(
+      `+ ${formatRecordFee(record.fee, record.total, record.decimals)} protocol fee`,
+    );
   }
 
   /**

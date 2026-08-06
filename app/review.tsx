@@ -9,7 +9,7 @@
  * Recipients and amounts arrive as router params in BASE UNITS — see `reviewParams.ts`.
  */
 import { useEffect, useMemo } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Linking, StyleSheet, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { formatUnits } from 'viem';
 
@@ -18,10 +18,14 @@ import { GasCheckCard } from '../src/components/GasCheckCard';
 import { Screen } from '../src/components/Screen';
 import { Body, Display, Eyebrow, Label, Mono } from '../src/components/Text';
 import { useContacts } from '../src/contacts/useContacts';
+import { useContractConstants } from '../src/contracts/useContractConstants';
 import { useEstimateBatch } from '../src/gateway/useEstimateBatch';
 import { useHistory } from '../src/history/useHistory';
+import { BASESCAN_TX_URL } from '../src/config/chain';
 import { DEFAULT_TOKEN } from '../src/config/tokens';
 import { colors, radii } from '../src/theme';
+import { useSendRecoveryContext } from '../src/tx/SendRecovery';
+import { formatFeeDisplay } from '../src/tx/amounts';
 import { formatEthAmount } from '../src/tx/gasPreflight';
 import { parseReviewParams, type RawReviewParams } from '../src/tx/reviewParams';
 import { useSendPreflight, type BlockerKind } from '../src/tx/useSendPreflight';
@@ -69,6 +73,13 @@ export default function ReviewScreen() {
   /** Hint only (spec §1.4) — the on-chain preflight above decides affordability. */
   const estimate = useEstimateBatch(batch?.recipients.length ?? 0, batch !== undefined);
 
+  /**
+   * Only for the sub-cent fee disclosure below. Cached, and falls back to the build-time
+   * literal until the read lands — acceptable here because it labels a rate rather than
+   * deciding an amount, and the amount itself always comes from the contract.
+   */
+  const { feeBps } = useContractConstants();
+
   if (!parsed.ok) {
     return (
       <Screen>
@@ -93,11 +104,17 @@ export default function ReviewScreen() {
   const amountFor = (i: number) =>
     mode === 'equal' ? (amountPerRecipient ?? 0n) : (amounts?.[i] ?? 0n);
 
+  /**
+   * `unconfirmed` deliberately blocks the button. A payment we have lost track of may
+   * well have gone through, and the one thing that must not be one tap away in that
+   * state is sending it a second time.
+   */
   const canSend =
     blocker === undefined &&
     totalCost !== undefined &&
     !preflight.isLoading &&
-    !send.isBusy;
+    !send.isBusy &&
+    send.phase !== 'unconfirmed';
 
   /**
    * Hand off to the dedicated Success screen (spec §3.5) with the CONTRACT's figures,
@@ -146,7 +163,11 @@ export default function ReviewScreen() {
         <CostRow label="Subtotal" value={`$${formatToken(subtotal)}`} />
         <CostRow
           label="Protocol fee"
-          value={feeAmount !== undefined ? `$${formatToken(feeAmount)}` : '—'}
+          value={
+            feeAmount !== undefined
+              ? formatFeeDisplay(feeAmount, token.decimals, feeBps)
+              : '—'
+          }
         />
         <View style={styles.divider} />
         <CostRow
@@ -206,6 +227,8 @@ export default function ReviewScreen() {
         </View>
       ) : null}
 
+      {send.phase === 'unconfirmed' ? <UnconfirmedCard hash={send.sentHash} /> : null}
+
       {send.phase === 'error' && send.error ? (
         <View style={styles.blockCard} accessibilityRole="alert">
           <Label style={styles.blockTitle}>Payment didn't complete</Label>
@@ -237,8 +260,14 @@ export default function ReviewScreen() {
         disabled={!canSend}
         loading={preflight.isLoading || send.isBusy}
         onPress={() => {
-          if (totalCost === undefined) return;
+          /**
+           * `address` is guaranteed by the `not-connected` blocker, but the send journal
+           * cannot look for a payment without knowing who signed it — so this is a hard
+           * guard rather than a `!`.
+           */
+          if (totalCost === undefined || !address) return;
           void send.start({
+            sender: address,
             token: token.address,
             mode,
             recipients,
@@ -251,9 +280,16 @@ export default function ReviewScreen() {
       />
 
       <Body style={styles.footnote}>
-        {send.isBusy
-          ? 'Keep this screen open until it finishes.'
-          : `${needsApproval ? '2 transactions' : '1 transaction'} · you keep your keys`}
+        {send.phase === 'unconfirmed'
+          ? 'Checked automatically whenever you open Spraay.'
+          : send.isBusy
+            ? /**
+               * It used to say "Keep this screen open until it finishes", which was both
+               * unenforceable — signing means leaving for the wallet — and, since the send
+               * journal, untrue. The payment is on disk before the wallet is asked.
+               */
+              'Safe to switch to your wallet — we pick this up either way.'
+            : `${needsApproval ? '2 transactions' : '1 transaction'} · you keep your keys`}
       </Body>
     </Screen>
   );
@@ -342,6 +378,67 @@ function SuccessRedirect({
   );
 }
 
+/**
+ * What the dust test should have shown instead of "Payment didn't complete".
+ *
+ * The distinction this card draws is the whole point of the `unconfirmed` phase: we asked
+ * the wallet, we did not get a usable answer back, and that is a statement about OUR
+ * connection — not about the user's money. The transaction may be mined already. So the
+ * copy commits to nothing it cannot prove, names the one action that is genuinely unsafe
+ * (resending), and gives two ways to find out: our own check, and the explorer.
+ *
+ * Recovery is already looking in the background on its own timer. The button is here for
+ * the case where the user never leaves the app, so nothing else would trigger a check.
+ */
+function UnconfirmedCard({ hash }: { hash?: string }) {
+  const recovery = useSendRecoveryContext();
+
+  /**
+   * Ask once as soon as this appears. Recovery's other triggers are launch and
+   * foreground, and this is exactly the case where neither fires — the user is standing
+   * on this screen wondering what happened. The first answer also arms recovery's own
+   * repeat check, so the card resolves itself without anyone tapping anything.
+   */
+  const { check } = recovery;
+  useEffect(() => {
+    check();
+  }, [check]);
+
+  return (
+    <View style={styles.unconfirmedCard} accessibilityRole="alert">
+      <Label style={styles.unconfirmedTitle}>We lost track of this payment</Label>
+      <Body style={styles.unconfirmedBody}>
+        Your wallet stopped answering before it told us how this ended
+        {hash ? ', but the payment was already handed to the network' : ''}. It may well
+        have gone through — we're checking Base now, and it will appear in History if it
+        did.
+      </Body>
+      <Body style={styles.unconfirmedWarning}>
+        Don't send it again until you've checked.
+      </Body>
+      <View style={styles.unconfirmedActions}>
+        <Button
+          title={recovery.isChecking ? 'Checking…' : 'Check again'}
+          variant="secondary"
+          size="sm"
+          loading={recovery.isChecking}
+          onPress={recovery.check}
+        />
+        {hash ? (
+          <Button
+            title="Basescan ↗"
+            variant="secondary"
+            size="sm"
+            onPress={() => {
+              void Linking.openURL(BASESCAN_TX_URL(hash));
+            }}
+          />
+        ) : null}
+      </View>
+    </View>
+  );
+}
+
 function Header() {
   return (
     <View style={styles.header}>
@@ -360,9 +457,14 @@ function Stepper({
   phase: SendPhase;
 }) {
   const approveDone =
-    phase === 'send-signing' || phase === 'send-pending' || phase === 'success';
+    phase === 'send-signing' ||
+    phase === 'send-pending' ||
+    phase === 'unconfirmed' ||
+    phase === 'success';
   const approveActive = phase === 'approve-signing' || phase === 'approve-pending';
-  const sendActive = phase === 'send-signing' || phase === 'send-pending';
+  /** `unconfirmed` keeps Send lit rather than ticked: it is unresolved, not finished. */
+  const sendActive =
+    phase === 'send-signing' || phase === 'send-pending' || phase === 'unconfirmed';
 
   return (
     <View style={styles.stepper}>
@@ -410,6 +512,8 @@ function confirmTitle(phase: SendPhase, needsApproval: boolean): string {
       return 'Confirm the payment in your wallet';
     case 'send-pending':
       return 'Sending…';
+    case 'unconfirmed':
+      return 'Checking Base…';
     case 'error':
       return 'Try again';
     default:
@@ -584,6 +688,22 @@ const styles = StyleSheet.create({
   },
   unverifiedTitle: { color: '#92400E', fontSize: 14 },
   unverifiedBody: { color: '#92400E', fontSize: 12.5, marginTop: 4, lineHeight: 18 },
+  /**
+   * Warn colours, not danger. This is an unknown, and the red card next to it means
+   * "your money is still in your wallet" — a promise that must not be made here.
+   */
+  unconfirmedCard: {
+    backgroundColor: colors.warnSoft,
+    borderWidth: 2,
+    borderColor: '#F59E0B',
+    borderRadius: radii.xl,
+    padding: 16,
+    marginTop: 14,
+  },
+  unconfirmedTitle: { color: '#92400E', fontSize: 15 },
+  unconfirmedBody: { color: '#92400E', fontSize: 13.5, marginTop: 6, lineHeight: 20 },
+  unconfirmedWarning: { color: '#7F1D1D', fontSize: 13.5, marginTop: 8, lineHeight: 20 },
+  unconfirmedActions: { flexDirection: 'row', gap: 10, marginTop: 12, flexWrap: 'wrap' },
   redirect: { alignItems: 'center', paddingVertical: 60 },
   redirectText: { fontSize: 28, color: colors.successDeep },
   errorCard: {

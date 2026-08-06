@@ -1,6 +1,11 @@
 import {
+  feeBpsFrom,
+  formatFeeDisplay,
+  formatFeeRate,
+  formatRecordFee,
   formatTokenAmount,
   formatTokenDisplay,
+  isSubCent,
   parseTokenAmount,
 } from '../amounts';
 
@@ -100,5 +105,93 @@ describe('formatTokenDisplay', () => {
   it('truncates sub-cent amounts for display only', () => {
     // The underlying value is untouched; this is presentation.
     expect(formatTokenDisplay(1n, USDC)).toBe('0.00');
+  });
+});
+
+describe('isSubCent', () => {
+  it('is true only for a real amount that would display as 0.00', () => {
+    expect(isSubCent(9_000n, USDC)).toBe(true); // 0.009
+    expect(isSubCent(900n, USDC)).toBe(true); // the dust-test fee, 0.0009
+    expect(isSubCent(1n, USDC)).toBe(true);
+    expect(isSubCent(10_000n, USDC)).toBe(false); // exactly 0.01
+    expect(isSubCent(0n, USDC)).toBe(false);
+  });
+
+  it('holds at other precisions', () => {
+    expect(isSubCent(9_000_000_000_000_000n, DAI)).toBe(true); // 0.009 DAI
+    expect(isSubCent(10_000_000_000_000_000n, DAI)).toBe(false); // 0.01 DAI
+    // A 2-decimal token cannot express a sub-cent amount at all.
+    expect(isSubCent(1n, 2)).toBe(false);
+  });
+});
+
+describe('formatFeeRate', () => {
+  it('reads as a percentage with no trailing zeros', () => {
+    expect(formatFeeRate(30)).toBe('0.3%');
+    expect(formatFeeRate(500)).toBe('5%');
+    expect(formatFeeRate(25)).toBe('0.25%');
+  });
+});
+
+describe('formatFeeDisplay', () => {
+  it('shows an ordinary fee as a normal amount', () => {
+    expect(formatFeeDisplay(30_000n, USDC, 30)).toBe('$0.03');
+    expect(formatFeeDisplay(1_250_000n, USDC, 30)).toBe('$1.25');
+  });
+
+  /**
+   * The whole point. The dust test charged 0.0009 USDC and the screen said "$0.00" —
+   * a fee we did take, displayed as nothing.
+   */
+  it('never renders a charged fee as $0.00', () => {
+    expect(formatFeeDisplay(900n, USDC, 30)).toBe('<$0.01 (0.3%)');
+    expect(formatFeeDisplay(900n, USDC)).toBe('<$0.01');
+    expect(formatFeeDisplay(1n, USDC, 30)).not.toContain('$0.00');
+  });
+
+  it('still says $0.00 when the fee really is zero', () => {
+    expect(formatFeeDisplay(0n, USDC, 30)).toBe('$0.00');
+  });
+});
+
+describe('feeBpsFrom', () => {
+  /**
+   * `total` is the payout EXCLUDING the fee, so the rate is measured against it and not
+   * against `total - fee`. Both dust runs: 0.30 out, 0.0009 taken, 30bps.
+   */
+  it('measures the fee against the payout it was charged on', () => {
+    expect(feeBpsFrom(900n, 300_000n)).toBe(30);
+    expect(feeBpsFrom(30_000n, 10_000_000n)).toBe(30);
+    expect(feeBpsFrom(1_000n, 100_000n)).toBe(100);
+  });
+
+  it('has no rate to report when there is no fee or no payout', () => {
+    expect(feeBpsFrom(0n, 300_000n)).toBeUndefined();
+    expect(feeBpsFrom(900n, 0n)).toBeUndefined();
+  });
+
+  it('reports no rate rather than a false "0%"', () => {
+    // 30_000 base units against 1.5 DAI is far below a basis point.
+    expect(feeBpsFrom(30_000n, 1_500_000_000_000_000_000n)).toBeUndefined();
+  });
+});
+
+/**
+ * The line every past-payment surface renders — the Success screen, the receipt detail
+ * opened from History, and the shared receipt text. Two of the three used to format the
+ * raw amount and printed "$0.00" for the fee the dust runs actually charged.
+ */
+describe('formatRecordFee', () => {
+  it('renders the dust-run fee as a rate, never as zero', () => {
+    expect(formatRecordFee(900n, 300_000n, USDC)).toBe('<$0.01 (0.3%)');
+  });
+
+  it('still renders an ordinary fee as a dollar amount', () => {
+    expect(formatRecordFee(30_000n, 10_000_000n, USDC)).toBe('$0.03');
+    expect(formatRecordFee(3_000_000n, 1_000_000_000n, USDC)).toBe('$3.00');
+  });
+
+  it('falls back to the bare threshold when no rate can be derived', () => {
+    expect(formatRecordFee(900n, 0n, USDC)).toBe('<$0.01');
   });
 });

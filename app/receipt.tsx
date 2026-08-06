@@ -16,7 +16,7 @@ import { BASESCAN_TX_URL } from '../src/config/chain';
 import { formatReceipt, formatReceiptDate } from '../src/history/receipt';
 import { useHistory } from '../src/history/useHistory';
 import { colors, radii } from '../src/theme';
-import { formatTokenDisplay } from '../src/tx/amounts';
+import { formatRecordFee, formatTokenDisplay } from '../src/tx/amounts';
 
 const shortAddress = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
 
@@ -75,7 +75,7 @@ export default function ReceiptScreen() {
         </Body>
         {record.fee > 0n ? (
           <Body style={styles.fee}>
-            includes ${formatTokenDisplay(record.fee, record.decimals)} protocol fee
+            + {formatRecordFee(record.fee, record.total, record.decimals)} protocol fee
           </Body>
         ) : null}
       </View>

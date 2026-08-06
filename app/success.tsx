@@ -23,7 +23,7 @@ import { useContacts } from '../src/contacts/useContacts';
 import { formatReceipt } from '../src/history/receipt';
 import { useHistory } from '../src/history/useHistory';
 import { colors, radii } from '../src/theme';
-import { formatTokenDisplay } from '../src/tx/amounts';
+import { formatRecordFee, formatTokenDisplay } from '../src/tx/amounts';
 
 const token = DEFAULT_TOKEN;
 const shortAddress = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
@@ -37,6 +37,8 @@ interface RawSuccessParams {
   mode?: string | string[];
   amounts?: string | string[];
   amountPerRecipient?: string | string[];
+  /** Set by `tx/SendRecovery.tsx` when this payment was found rather than watched. */
+  recovered?: string | string[];
 }
 
 const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v);
@@ -60,6 +62,7 @@ export default function SuccessScreen() {
   const total = toBigInt(one(raw.total));
   const fee = toBigInt(one(raw.fee));
   const count = Number(one(raw.count) ?? '0') || 0;
+  const isRecovered = one(raw.recovered) === '1';
 
   const recipients = useMemo(
     () =>
@@ -103,6 +106,22 @@ export default function SuccessScreen() {
     <Screen>
       <SprayAnimation />
 
+      {isRecovered ? (
+        /**
+         * Reached when recovery found this payment on chain rather than watching it land
+         * — the app had lost contact, usually because it was in the background while the
+         * wallet did its part. Saying so matters: without it this reads as a payment the
+         * user just made, when they may have been told minutes ago that it failed.
+         */
+        <View style={styles.recoveredCard}>
+          <Label style={styles.recoveredTitle}>Found on Base</Label>
+          <Body style={styles.recoveredBody}>
+            We lost contact with your wallet before this finished, so we checked the chain.
+            It went through, and it's now in your History.
+          </Body>
+        </View>
+      ) : null}
+
       <View style={styles.headline}>
         <Display style={styles.amount}>
           ${formatTokenDisplay(total, token.decimals)}
@@ -112,7 +131,7 @@ export default function SuccessScreen() {
         </Body>
         {fee > 0n ? (
           <Body style={styles.fee}>
-            includes ${formatTokenDisplay(fee, token.decimals)} protocol fee
+            + {formatRecordFee(fee, total, token.decimals)} protocol fee
           </Body>
         ) : null}
       </View>
@@ -269,6 +288,19 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
   drop: { fontSize: 26, position: 'absolute' },
+  recoveredCard: {
+    backgroundColor: colors.successSoft,
+    borderRadius: radii.lg,
+    padding: 12,
+    marginTop: 4,
+  },
+  recoveredTitle: { color: colors.successDeep, fontSize: 14 },
+  recoveredBody: {
+    color: colors.successDeep,
+    fontSize: 12.5,
+    marginTop: 4,
+    lineHeight: 18,
+  },
   headline: { alignItems: 'center', marginTop: 6 },
   amount: { fontSize: 40, color: colors.ink },
   sub: { fontSize: 15, color: colors.muted, marginTop: 6 },

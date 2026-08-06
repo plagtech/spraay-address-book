@@ -123,4 +123,24 @@ export const ERC20_ABI = [
     ],
     outputs: [{ name: '', type: 'bool' }],
   },
+  /**
+   * The standard ERC-20 event. Declared because `SprayTokenExecuted` carries the TOTALS
+   * of a spray but not who was paid — so a receipt read back after the fact
+   * (`tx/sprayReceipt.ts`) has only these logs to reconstruct the per-person breakdown
+   * from.
+   *
+   * Verified against the live transaction rather than copied from an artifact: topic0 on
+   * the USDC legs of `0xcb617e88…c615` is
+   * `0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef`, with `from` and
+   * `to` in the topics and the value alone in `data` — exactly this shape.
+   */
+  {
+    type: 'event',
+    name: 'Transfer',
+    inputs: [
+      { name: 'from', type: 'address', indexed: true },
+      { name: 'to', type: 'address', indexed: true },
+      { name: 'value', type: 'uint256', indexed: false },
+    ],
+  },
 ] as const;

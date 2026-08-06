@@ -9,16 +9,20 @@ import '@walletconnect/react-native-compat';
 import 'react-native-get-random-values';
 
 /**
- * TEMPORARY wallet-connect diagnostics. Ordering is load-bearing, same as the polyfills
- * above: this must run AFTER them (it inspects WebSocket/crypto/Buffer) and BEFORE
- * anything imports the AppKit module, because AppKit builds its instance at module
- * scope and its constructor is what we are trying to instrument.
+ * Native-scheme-first wallet launching, with the universal link as fallback.
  *
- * A bare side-effect import, not a function call — `import` statements are evaluated
- * before the module body, so a call placed here would run too late. Remove once init
- * is fixed.
+ * Ordering is load-bearing, same as the polyfills above: this must run AFTER them and
+ * BEFORE anything that imports AppKit, because AppKit builds its instance at module
+ * scope and this wraps `Linking.openURL` underneath it.
+ *
+ * A bare side-effect import, not a function call — `import` statements are hoisted, so a
+ * call placed here would run after every other import had already been evaluated.
+ *
+ * (This slot used to hold the wallet-connect diagnostics too, immediately above this
+ * line, so their wrapper nested outside this one. They came out after the Step 7 dust
+ * test; this module is the shipping launch path and stays.)
  */
-import '../src/wallet/diagnostics';
+import '../src/wallet/walletLinking';
 
 import { useEffect } from 'react';
 import { Stack } from 'expo-router';
@@ -35,6 +39,7 @@ import { Inter_600SemiBold } from '@expo-google-fonts/inter/600SemiBold';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { colors } from '../src/theme';
+import { SendRecoveryProvider } from '../src/tx/SendRecovery';
 import { WalletProvider } from '../src/wallet/WalletProvider';
 
 SplashScreen.preventAutoHideAsync().catch(() => {
@@ -64,13 +69,22 @@ export default function RootLayout() {
     <SafeAreaProvider>
       <WalletProvider>
         <StatusBar style="dark" />
-        <Stack
-          screenOptions={{
-            headerShown: false,
-            contentStyle: { backgroundColor: colors.bg },
-            animation: 'slide_from_right',
-          }}
-        />
+        {/**
+         * Draws nothing. Settles any payment left outstanding — by this run or by one
+         * that was killed mid-flight — against the chain, writes it to History and shows
+         * the Success screen for it. Inside WalletProvider because it writes through the
+         * shared query cache, and wrapped around the Stack so the one instance is
+         * reachable from the screens. See `src/tx/SendRecovery.tsx`.
+         */}
+        <SendRecoveryProvider>
+          <Stack
+            screenOptions={{
+              headerShown: false,
+              contentStyle: { backgroundColor: colors.bg },
+              animation: 'slide_from_right',
+            }}
+          />
+        </SendRecoveryProvider>
       </WalletProvider>
     </SafeAreaProvider>
   );
