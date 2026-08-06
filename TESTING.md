@@ -103,3 +103,45 @@ surfaces render the same value and both were wrong:
 
 Covered by tests in `src/tx/__tests__/amounts.test.ts` and
 `src/history/__tests__/receipt.test.ts`, both using the real dust-run figures.
+
+#### Second pass — two surfaces were missed
+
+On-device with a confirmed-fresh bundle, a receipt opened from History still read
+"includes $0.00 protocol fee" for both recorded payments. The first pass fixed the two
+surfaces that were grepped for and not the two that existed:
+
+| Surface | File | First pass |
+| --- | --- | --- |
+| Review | `app/review.tsx` | fixed |
+| Shared receipt text | `src/history/receipt.ts` | fixed |
+| Receipt detail, opened from History | `app/receipt.tsx` | **missed** |
+| Success screen | `app/success.tsx` | **missed** |
+
+The two missed ones had their own copy of the line — `includes ${formatTokenDisplay(…)}
+protocol fee` — rather than sharing a formatter, so fixing the shared receipt text did
+nothing for the screen that displays a receipt. History list rows show the total only
+and never had a fee line; the network-fee line in `GasCheckCard` is ETH gas, not this.
+
+All three past-payment surfaces now make one call to `formatRecordFee`, so there is no
+per-screen formatting left to get wrong.
+
+#### The rate is measured against `total`, not `total - fee`
+
+Fixing the above surfaced a wrong assumption in the first pass. A record's `total` is the
+payout EXCLUDING the fee — `SprayTokenExecuted.totalAmount`, described in
+`sprayReceipt.ts` as "the figure the fee is charged ON TOP of", and stored verbatim by
+`buildSendRecordFromReceipt`. The first pass derived the rate as `fee / (total - fee)`,
+which is wrong; it returned 0.3% for the dust runs only because integer division
+truncated the error away.
+
+A test fixture had encoded the same mistake — a 10.00 payout stored as `total:
+10_030_000n` with 5.00 + 5.00 in its recipient rows, which cannot both be true. Fixed to
+`10_000_000n`. A rate that rounds to "0%" is now reported as no rate at all, on the same
+principle as the amount: `<$0.01` alone rather than `<$0.01 (0%)`.
+
+#### Still open: "includes" is the wrong word
+
+Not changed, because it is a copy decision rather than a formatting bug. Since `total`
+excludes the fee, the sender paid `total + fee` — so "includes $0.03 protocol fee" on a
+$10.00 receipt describes the fee as being inside a number it is not inside. "plus" would
+be accurate. Applies to all three past-payment surfaces.

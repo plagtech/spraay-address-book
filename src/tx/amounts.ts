@@ -95,3 +95,32 @@ export function formatFeeDisplay(value: bigint, decimals: number, bps?: number):
   if (!isSubCent(value, decimals)) return `$${formatTokenDisplay(value, decimals)}`;
   return bps === undefined ? '<$0.01' : `<$0.01 (${formatFeeRate(bps)})`;
 }
+
+/**
+ * The rate a completed payment actually charged, from its own figures.
+ *
+ * `total` is the payout EXCLUDING the fee — what the contract emits as `totalAmount`,
+ * described there as "the figure the fee is charged ON TOP of", and what a history
+ * record stores. So the fee is measured against `total`, NOT against `total - fee`.
+ *
+ * Derived rather than read from the contract because a past payment has to keep
+ * reporting the rate it was actually charged, whatever the rate is today.
+ */
+export function feeBpsFrom(fee: bigint, total: bigint): number | undefined {
+  if (fee <= 0n || total <= 0n) return undefined;
+  const bps = Number((fee * 10_000n) / total);
+  /** A rate that rounds to "0%" is as false as an amount that rounds to "$0.00". */
+  return bps > 0 ? bps : undefined;
+}
+
+/**
+ * The fee line for a payment that has already happened — the Success screen, the receipt
+ * detail, and the shared receipt text.
+ *
+ * One function for all three because they had drifted: two of them formatted the raw
+ * amount and printed "$0.00" for the sub-cent fee the dust test actually charged. A
+ * single call site per screen is the point — there is nothing left to get right locally.
+ */
+export function formatRecordFee(fee: bigint, total: bigint, decimals: number): string {
+  return formatFeeDisplay(fee, decimals, feeBpsFrom(fee, total));
+}

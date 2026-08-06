@@ -20,7 +20,13 @@ const record = (over: Partial<SendRecord> = {}): SendRecord => ({
     { address: B, name: 'Grace', amount: 5_000_000n },
   ],
   recipientCount: 2,
-  total: 10_030_000n,
+  /**
+   * `total` is the payout EXCLUDING the fee — what `SprayTokenExecuted` emits and what
+   * `buildSendRecordFromReceipt` stores. It must equal the recipient rows: 5 + 5, with
+   * 0.03 charged on top. An earlier fixture had 10.03 here, which quietly modelled the
+   * fee as being inside the total and is what made a derived rate come out wrong.
+   */
+  total: 10_000_000n,
   fee: 30_000n,
   token: 'USDC',
   decimals: 6,
@@ -42,7 +48,7 @@ describe('formatReceipt', () => {
     const text = formatReceipt(record());
     expect(text).toContain('27 Jul 2026');
     expect(text).toContain('2 people');
-    expect(text).toContain('$10.03 USDC');
+    expect(text).toContain('$10.00 USDC');
     expect(text).toContain(`https://basescan.org/tx/${HASH}`);
   });
 
@@ -57,17 +63,17 @@ describe('formatReceipt', () => {
 
   /**
    * Shared text leaves the phone, so a fee rounded to "$0.00" is a false claim that
-   * travels. Mirrors the dust test: 0.30 out, 0.0009 taken.
+   * travels. These are the real dust-test figures: 0.30 paid out, 0.0009 taken.
    */
   it('never claims a sub-cent fee was zero', () => {
-    const text = formatReceipt(record({ total: 300_900n, fee: 900n }));
+    const text = formatReceipt(record({ total: 300_000n, fee: 900n }));
     expect(text).toContain('Includes <$0.01 (0.3%) fee');
     expect(text).not.toContain('$0.00');
   });
 
   it('derives the rate from the record, not from the current contract', () => {
     // A record written under a 1% fee keeps reporting 1%, whatever the fee is today.
-    const text = formatReceipt(record({ total: 101_000n, fee: 1_000n }));
+    const text = formatReceipt(record({ total: 100_000n, fee: 1_000n }));
     expect(text).toContain('(1%)');
   });
 

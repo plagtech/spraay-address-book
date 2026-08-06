@@ -23,7 +23,7 @@ import { useContacts } from '../src/contacts/useContacts';
 import { formatReceipt } from '../src/history/receipt';
 import { useHistory } from '../src/history/useHistory';
 import { colors, radii } from '../src/theme';
-import { formatTokenDisplay } from '../src/tx/amounts';
+import { formatRecordFee, formatTokenDisplay } from '../src/tx/amounts';
 
 const token = DEFAULT_TOKEN;
 const shortAddress = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
@@ -131,7 +131,7 @@ export default function SuccessScreen() {
         </Body>
         {fee > 0n ? (
           <Body style={styles.fee}>
-            includes ${formatTokenDisplay(fee, token.decimals)} protocol fee
+            includes {formatRecordFee(fee, total, token.decimals)} protocol fee
           </Body>
         ) : null}
       </View>
