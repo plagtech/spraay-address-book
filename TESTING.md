@@ -76,9 +76,9 @@ Kept, deliberately:
   Its import in `_layout.tsx` was ordered after `diagnostics` so the wrappers nested;
   with diagnostics gone it only has to precede anything that imports AppKit, and the
   comment there now says so.
-- `getLastLaunch()` in that module — no UI reads it since the panel went, kept as a
-  debugger handle.
 - The `[wallet-diag link]` log tag, which is what existing notes and captures grep for.
+  The logs are the surviving record of which link format opened the wallet —
+  `getLastLaunch()` and its in-memory `LaunchRecord` went with the panel that read them.
 - `pendingSend` / reconcile / backfill — product code, and the reason Run 1 was
   recoverable at all.
 

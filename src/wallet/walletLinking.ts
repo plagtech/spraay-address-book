@@ -62,31 +62,9 @@ import { WALLET_LINK_FALLBACKS } from './wallets';
 const tag = (msg: string) => `[wallet-diag link] ${msg}`;
 
 /** Which link FORMAT opened the wallet, independent of which was tried first. */
-export type LaunchVariant = 'scheme' | 'universal' | 'passthrough';
+type LaunchVariant = 'scheme' | 'universal';
 
-export type LaunchRecord = {
-  variant: LaunchVariant;
-  /** Whether the winning variant was the first choice or the fallback. */
-  position: 'primary' | 'fallback';
-  /** The URL that actually opened, or the last one attempted if all failed. */
-  url: string;
-  /** Set when an earlier attempt failed before this one succeeded. */
-  primaryError?: string;
-  atMs: number;
-};
-
-type Attempt = { variant: Exclude<LaunchVariant, 'passthrough'>; url: string };
-
-let lastLaunch: LaunchRecord | undefined;
-
-/**
- * No UI reads this since the Diagnostics panel was removed — it is kept as a debugger
- * handle, because the launch record is the one piece of state that says which format
- * won and it costs nothing to hold.
- */
-export function getLastLaunch(): LaunchRecord | undefined {
-  return lastLaunch;
-}
+type Attempt = { variant: LaunchVariant; url: string };
 
 /**
  * Swap a native scheme prefix for its universal base, preserving everything after it.
@@ -147,15 +125,7 @@ export function installWalletLinking() {
     const match = findScheme(url);
 
     /** Anything that is not one of our declared schemes is none of this module's business. */
-    if (!match) {
-      lastLaunch = {
-        variant: 'passthrough',
-        position: 'primary',
-        url,
-        atMs: Date.now(),
-      };
-      return original(url);
-    }
+    if (!match) return original(url);
 
     const [scheme, universalBase] = match;
     const attempts = planAttempts(url, scheme, universalBase);
@@ -177,13 +147,6 @@ export function installWalletLinking() {
 
       try {
         const result = await original(attempt.url);
-        lastLaunch = {
-          variant: attempt.variant,
-          position,
-          url: attempt.url,
-          primaryError,
-          atMs: Date.now(),
-        };
         console.log(
           tag(
             `PATH=${attempt.variant} (${position}) — opened${
@@ -207,13 +170,6 @@ export function installWalletLinking() {
           continue;
         }
 
-        lastLaunch = {
-          variant: attempt.variant,
-          position,
-          url: attempt.url,
-          primaryError,
-          atMs: Date.now(),
-        };
         console.warn(
           tag(
             `PATH=none — every variant failed. ` +
